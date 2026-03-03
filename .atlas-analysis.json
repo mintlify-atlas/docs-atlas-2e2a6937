@@ -1,0 +1,115 @@
+{
+  "projectType": "api-service",
+  "projectName": "Exchange",
+  "projectDescription": "A high-performance centralized cryptocurrency exchange built in Rust with sub-10ms order execution.",
+  "theme": "aspen",
+  "primaryColor": "#FF8C00",
+  "lightColor": "#FFA500",
+  "darkColor": "#CC7000",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "architecture"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/matching-engine",
+              "concepts/order-book",
+              "concepts/balance-management",
+              "concepts/websocket-streaming"
+            ]
+          },
+          {
+            "group": "Deployment",
+            "pages": [
+              "deployment/local-development",
+              "deployment/docker",
+              "deployment/production",
+              "deployment/configuration"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Overview",
+            "pages": [
+              "api/overview",
+              "api/authentication"
+            ]
+          },
+          {
+            "group": "Order Management",
+            "pages": [
+              "api/orders/create-order",
+              "api/orders/get-order",
+              "api/orders/cancel-order",
+              "api/orders/get-open-orders",
+              "api/orders/cancel-all-orders"
+            ]
+          },
+          {
+            "group": "Market Data",
+            "pages": [
+              "api/market/depth",
+              "api/market/trades",
+              "api/market/klines",
+              "api/market/tickers"
+            ]
+          },
+          {
+            "group": "User Management",
+            "pages": [
+              "api/users/create-user",
+              "api/users/deposit",
+              "api/users/withdraw"
+            ]
+          },
+          {
+            "group": "WebSocket",
+            "pages": [
+              "api/websocket/overview",
+              "api/websocket/subscriptions"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Sub-10ms order execution with in-memory order book",
+    "Real-time WebSocket updates for market depth, trades, and tickers",
+    "Advanced price-time priority matching engine",
+    "Fault-tolerant architecture with Redis pub/sub and Postgres storage",
+    "REST and WebSocket APIs for seamless integration",
+    "High-performance asynchronous runtime with Tokio and Actix"
+  ],
+  "publicApiSurface": [
+    "POST /api/v1/order - Create/Execute order",
+    "GET /api/v1/order - Get order details",
+    "DELETE /api/v1/order - Cancel order",
+    "GET /api/v1/orders - Get open orders",
+    "DELETE /api/v1/orders - Cancel all orders",
+    "GET /api/v1/klines - Get candlestick data",
+    "GET /api/v1/depth - Get order book depth",
+    "GET /api/v1/trades - Get recent trades",
+    "GET /api/v1/tickers - Get market tickers",
+    "POST /api/v1/users - Create user",
+    "POST /api/v1/user/deposit - Deposit funds",
+    "POST /api/v1/user/withdraw - Withdraw funds",
+    "WebSocket: Market depth subscriptions",
+    "WebSocket: Trade update subscriptions",
+    "WebSocket: Ticker subscriptions"
+  ]
+}
