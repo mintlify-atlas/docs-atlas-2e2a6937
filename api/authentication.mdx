@@ -35,7 +35,7 @@ POST /api/v1/users
 
 **Response:**
 
-```json
+```json Response
 {
   "user_id": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
   "balances": [
@@ -95,7 +95,8 @@ The following endpoints require a `user_id` in the request body:
 POST /api/v1/order
 ```
 
-```json Request body
+```json
+
 {
   "market": "SOL_USDC",
   "price": "150.50",
@@ -111,7 +112,7 @@ POST /api/v1/order
 GET /api/v1/order
 ```
 
-```json Request body
+```json
 {
   "user_id": "user-123",
   "order_id": "order-456",
@@ -125,7 +126,7 @@ GET /api/v1/order
 DELETE /api/v1/order
 ```
 
-```json Request body
+```json
 {
   "order_id": "order-456",
   "user_id": "user-123",
@@ -141,7 +142,7 @@ DELETE /api/v1/order
 GET /api/v1/orders
 ```
 
-```json Request body
+```json
 {
   "user_id": "user-123",
   "market": "SOL_USDC"
@@ -154,7 +155,7 @@ GET /api/v1/orders
 DELETE /api/v1/orders
 ```
 
-```json Request body
+```json
 {
   "user_id": "user-123",
   "market": "SOL_USDC"
@@ -167,7 +168,7 @@ DELETE /api/v1/orders
 
 If you attempt to call an authenticated endpoint without providing a `user_id`, the request will fail during deserialization:
 
-```json Error response
+```json
 {
   "error": "Bad Request"
 }
@@ -177,7 +178,7 @@ If you attempt to call an authenticated endpoint without providing a `user_id`, 
 
 If you provide a `user_id` that doesn't exist in the system, the order processing service will reject the request:
 
-```json Error response
+```json
 {
   "error": "User not found"
 }
