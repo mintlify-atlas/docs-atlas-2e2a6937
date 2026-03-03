@@ -1,0 +1,403 @@
+---
+title: Production deployment
+description: Deploy the Exchange platform to production using GitHub Actions and Docker
+---
+
+The Exchange platform uses automated CI/CD with GitHub Actions to build, push, and deploy Docker images to production. This guide covers the production deployment strategy and best practices.
+
+## Deployment architecture
+
+The production deployment follows a GitOps workflow:
+
+1. **Code push** to `main` branch triggers the CI/CD pipeline
+2. **Docker images** are built for all services
+3. **Images are pushed** to Docker Hub with commit SHA tags
+4. **Deployment manifests** are updated in a separate ops repository
+5. **Kubernetes/Docker** pulls and deploys the new images
+
+## GitHub Actions workflow
+
+The production deployment is automated using GitHub Actions:
+
+<Steps>
+  <Step title="Trigger on push to main">
+    The workflow runs on every push to the `main` branch:
+
+    ```yaml .github/workflows/production.yml
+    name: Continuous Deployment (Production)
+
+    on:
+      push:
+        branches: ["main"]
+    ```
+  </Step>
+
+  <Step title="Docker login">
+    Authenticate to Docker Hub using repository secrets:
+
+    ```yaml
+    - name: Docker login
+      uses: docker/login-action@v2
+      with:
+        username: ${{ secrets.DOCKER_USERNAME }}
+        password: ${{ secrets.DOCKER_PASSWORD }}
+    ```
+  </Step>
+
+  <Step title="Build and push images">
+    Each service is built and pushed with the commit SHA as the tag:
+
+    ```yaml
+    - name: Build and push exchange-router images
+      uses: docker/build-push-action@v4
+      with:
+        context: .
+        file: docker/Dockerfile.router
+        push: true
+        tags: jogeshwar01/exchange-router:${{ github.sha }}
+    ```
+
+    This is repeated for all four services:
+    - `exchange-router`
+    - `exchange-ws-stream`
+    - `exchange-db-processor`
+    - `exchange-engine`
+  </Step>
+
+  <Step title="Update deployment manifests">
+    The workflow automatically updates the ops repository:
+
+    ```yaml
+    - name: Clone exchange-ops repo, update image tags, and push tags
+      env:
+        PAT: ${{ secrets.PAT }}
+      run: |
+        git clone https://github.com/jogeshwar01/exchange-ops.git
+        cd exchange-ops
+
+        sed -i 's|image: jogeshwar01/exchange-router:.*|image: jogeshwar01/exchange-router:${{ github.sha }}|' backend/deployment.yml
+        sed -i 's|image: jogeshwar01/exchange-ws-stream:.*|image: jogeshwar01/exchange-ws-stream:${{ github.sha }}|' websocket/deployment.yml
+        sed -i 's|image: jogeshwar01/exchange-db-processor:.*|image: jogeshwar01/exchange-db-processor:${{ github.sha }}|' db-processor/deployment.yml
+        sed -i 's|image: jogeshwar01/exchange-engine:.*|image: jogeshwar01/exchange-engine:${{ github.sha }}|' engine/deployment.yml
+
+        git config user.name "GitHub Actions Bot"
+        git config user.email "actions@github.com"
+        git add .
+        git commit -m "deploy: update exchange image tags to ${{ github.sha }}"
+        git push https://${PAT}@github.com/jogeshwar01/exchange-ops.git main
+    ```
+  </Step>
+</Steps>
+
+## Required GitHub secrets
+
+Configure the following secrets in your GitHub repository settings:
+
+<Steps>
+  <Step title="DOCKER_USERNAME">
+    Your Docker Hub username for pushing images.
+
+    ```bash
+    # Example
+    jogeshwar01
+    ```
+  </Step>
+
+  <Step title="DOCKER_PASSWORD">
+    Your Docker Hub password or access token.
+
+    <Warning>
+      Use a Docker Hub access token instead of your password for better security.
+    </Warning>
+  </Step>
+
+  <Step title="PAT (Personal Access Token)">
+    GitHub Personal Access Token with `repo` scope to update the ops repository.
+
+    Generate at: https://github.com/settings/tokens
+
+    Required scopes:
+    - `repo` - Full control of private repositories
+  </Step>
+</Steps>
+
+## Setting up GitHub secrets
+
+1. Go to your repository on GitHub
+2. Navigate to **Settings** → **Secrets and variables** → **Actions**
+3. Click **New repository secret**
+4. Add each secret with its corresponding value
+
+## Production server setup
+
+<Steps>
+  <Step title="Connect to your server">
+    SSH into your production server:
+
+    ```bash
+    ssh -i key.pem ubuntu@<server-ip>
+    ```
+  </Step>
+
+  <Step title="Install Docker">
+    Install Docker and Docker Compose:
+
+    ```bash
+    # Add Docker's official GPG key
+    sudo apt-get update
+    sudo apt-get install ca-certificates curl
+    sudo install -m 0755 -d /etc/apt/keyrings
+    sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+    sudo chmod a+r /etc/apt/keyrings/docker.asc
+
+    # Add the repository to Apt sources
+    echo \
+      "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu \
+      $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
+      sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+    # Install Docker
+    sudo apt-get update
+    sudo apt-get install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+    ```
+  </Step>
+
+  <Step title="Configure Docker permissions">
+    Add your user to the docker group:
+
+    ```bash
+    sudo usermod -aG docker $USER
+    newgrp docker
+    docker ps  # Verify it works
+    ```
+  </Step>
+
+  <Step title="Clone the ops repository">
+    ```bash
+    git clone https://github.com/jogeshwar01/exchange-ops.git
+    cd exchange-ops
+    ```
+  </Step>
+
+  <Step title="Configure environment">
+    Create and configure the `.env` file:
+
+    ```bash
+    cp .env.example .env
+    nano .env  # Edit with production values
+    ```
+
+    <Warning>
+      Use strong passwords and secure credentials in production!
+    </Warning>
+  </Step>
+
+  <Step title="Start services">
+    ```bash
+    docker compose up -d
+    ```
+  </Step>
+</Steps>
+
+## Production environment variables
+
+Critical production configurations:
+
+### Database configuration
+
+```bash
+POSTGRES_HOST=exchange-postgres
+POSTGRES_DB=exchange-db
+POSTGRES_USER=<strong-username>
+POSTGRES_PASSWORD=<strong-password>
+POSTGRES_PORT=5432
+PG__POOL_MAX_SIZE=16
+```
+
+### Redis configuration
+
+```bash
+REDIS_URL=redis://exchange-redis:6379
+```
+
+### Service endpoints
+
+```bash
+SERVER_ADDR=0.0.0.0:8080
+WS_STREAM_URL=0.0.0.0:4000
+```
+
+<Note>
+  See the [Configuration guide](/deployment/configuration) for detailed environment variable documentation.
+</Note>
+
+## Performance tuning
+
+### PostgreSQL optimization
+
+Increase max connections for high load:
+
+```yaml
+db:
+  command: -c 'max_connections=800'
+  shm_size: 1gb
+```
+
+### Memory limits
+
+Adjust based on your server capacity:
+
+```yaml
+deploy:
+  resources:
+    limits:
+      memory: 5G
+```
+
+### Connection pooling
+
+Configure optimal pool size:
+
+```bash
+PG__POOL_MAX_SIZE=16  # Adjust based on load
+```
+
+### Redis persistence
+
+Configure Redis snapshot frequency:
+
+```yaml
+redis:
+  command: redis-server --save 20 1 --loglevel warning
+```
+
+This saves to disk if at least 1 key changed in 20 seconds.
+
+## Monitoring and health checks
+
+### Check service status
+
+```bash
+# View running containers
+docker ps
+
+# Check specific service logs
+docker logs -f exchange-router
+```
+
+### Resource monitoring
+
+```bash
+# Container resource usage
+docker stats
+
+# System resources
+top
+htop
+```
+
+### Database health
+
+```bash
+# Check PostgreSQL
+docker exec -it exchange-postgres psql -U root -d exchange-db -c "SELECT COUNT(*) FROM trades;"
+
+# Check Redis
+docker exec -it exchange-redis redis-cli ping
+```
+
+## Rollback strategy
+
+If a deployment fails, rollback to a previous version:
+
+<Steps>
+  <Step title="Identify the previous commit SHA">
+    ```bash
+    git log --oneline
+    ```
+  </Step>
+
+  <Step title="Update deployment manifests">
+    ```bash
+    cd exchange-ops
+    sed -i 's|image: jogeshwar01/exchange-router:.*|image: jogeshwar01/exchange-router:<previous-sha>|' backend/deployment.yml
+    # Repeat for other services
+    ```
+  </Step>
+
+  <Step title="Commit and push">
+    ```bash
+    git add .
+    git commit -m "rollback: revert to <previous-sha>"
+    git push
+    ```
+  </Step>
+
+  <Step title="Pull and restart services">
+    ```bash
+    docker compose pull
+    docker compose up -d
+    ```
+  </Step>
+</Steps>
+
+## Security best practices
+
+<Warning>
+  Always follow these security practices in production:
+</Warning>
+
+- Use **strong passwords** for database and Redis
+- Store secrets in **GitHub Secrets**, never in code
+- Use **TLS/SSL** for all external connections
+- Enable **firewall rules** to restrict access
+- Regularly **update dependencies** and Docker images
+- Implement **rate limiting** on API endpoints
+- Enable **audit logging** for all transactions
+- Use **read replicas** for database scalability
+
+## Backup strategy
+
+### Database backups
+
+```bash
+# Automated daily backup
+docker exec exchange-postgres pg_dump -U root exchange-db > backup-$(date +%Y%m%d).sql
+```
+
+### Redis backups
+
+Redis automatically saves to:
+```
+docker/redis-data/dump.rdb
+```
+
+Copy this file regularly to backup storage.
+
+## Scaling considerations
+
+### Horizontal scaling
+
+For high-traffic deployments:
+
+- Run multiple instances of `router` behind a load balancer
+- Use a dedicated Redis cluster
+- Implement database read replicas
+- Use separate servers for each service
+
+### Vertical scaling
+
+Increase resources per service:
+
+```yaml
+deploy:
+  resources:
+    limits:
+      memory: 10G
+      cpus: '4'
+```
+
+## Next steps
+
+- Configure [environment variables](/deployment/configuration)
+- Review [API authentication](/api/authentication)

@@ -1,0 +1,117 @@
+---
+title: 'Withdraw funds'
+description: 'Withdraw funds from a user account'
+---
+
+<Warning>
+This endpoint is pending implementation and is not currently available in the API.
+</Warning>
+
+## Endpoint
+
+```
+POST /api/v1/users/withdraw
+```
+
+This endpoint will allow users to withdraw funds from their exchange account to an external wallet.
+
+## Planned request structure
+
+<ParamField body="user_id" type="string" required>
+  The unique identifier of the user making the withdrawal
+</ParamField>
+
+<ParamField body="asset" type="string" required>
+  The asset to withdraw (e.g., "USDC", "SOL")
+</ParamField>
+
+<ParamField body="amount" type="decimal" required>
+  The amount to withdraw
+</ParamField>
+
+<ParamField body="destination_address" type="string" required>
+  The blockchain address to send funds to
+</ParamField>
+
+<ParamField body="network" type="string">
+  The blockchain network for the withdrawal (e.g., "solana", "ethereum")
+</ParamField>
+
+## Planned response structure
+
+<ResponseField name="status" type="string">
+  Status message indicating withdrawal initiated
+</ResponseField>
+
+<ResponseField name="user_id" type="string">
+  The user ID that initiated the withdrawal
+</ResponseField>
+
+<ResponseField name="asset" type="string">
+  The withdrawn asset
+</ResponseField>
+
+<ResponseField name="amount" type="decimal">
+  The withdrawn amount
+</ResponseField>
+
+<ResponseField name="balance" type="decimal">
+  The user's remaining balance for the asset
+</ResponseField>
+
+<ResponseField name="transaction_id" type="string">
+  The blockchain transaction ID for tracking
+</ResponseField>
+
+<ResponseField name="withdrawal_id" type="string">
+  Internal withdrawal reference ID
+</ResponseField>
+
+## Example request
+
+```bash
+curl -X POST \
+  https://api.exchange.com/api/v1/users/withdraw \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "user_id": "550e8400-e29b-41d4-a716-446655440000",
+    "asset": "USDC",
+    "amount": "500.00",
+    "destination_address": "8xK3v...",
+    "network": "solana"
+  }'
+```
+
+## Example response
+
+```json
+{
+  "status": "Withdrawal initiated",
+  "user_id": "550e8400-e29b-41d4-a716-446655440000",
+  "asset": "USDC",
+  "amount": "500.00",
+  "balance": "500.00",
+  "transaction_id": "0x456def...",
+  "withdrawal_id": "wd_7890xyz"
+}
+```
+
+## Error responses
+
+<ResponseField name="400" type="Bad Request">
+  Invalid parameters or insufficient balance
+</ResponseField>
+
+<ResponseField name="500" type="Internal Server Error">
+  Withdrawal processing failed
+</ResponseField>
+
+## Notes
+
+This functionality will need to:
+- Verify sufficient user balance
+- Validate destination addresses
+- Implement withdrawal limits and security checks
+- Process blockchain transactions
+- Handle transaction fees
+- Implement withdrawal approval workflows for security

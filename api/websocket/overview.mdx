@@ -1,0 +1,244 @@
+---
+title: WebSocket overview
+description: Real-time market data streaming via WebSocket connections
+---
+
+The Exchange WebSocket API provides real-time market data updates for trading pairs. Connect to receive live order book depth, trades, and ticker information with low latency.
+
+## Connection endpoint
+
+Connect to the WebSocket server using the following endpoint:
+
+```
+ws://your-exchange-domain/ws
+```
+
+The actual URL is configured via the `WS_STREAM_URL` environment variable on the server.
+
+## Connection process
+
+<Steps>
+  <Step title="Establish WebSocket connection">
+    Open a WebSocket connection to the endpoint. The server accepts standard WebSocket handshake requests.
+
+    <CodeGroup>
+    ```javascript JavaScript
+    const ws = new WebSocket('ws://your-exchange-domain/ws');
+
+    ws.onopen = () => {
+      console.log('Connected to Exchange WebSocket');
+    };
+
+    ws.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+      console.log('Received:', data);
+    };
+
+    ws.onerror = (error) => {
+      console.error('WebSocket error:', error);
+    };
+
+    ws.onclose = () => {
+      console.log('Connection closed');
+    };
+    ```
+
+    ```python Python
+    import asyncio
+    import websockets
+    import json
+
+    async def connect():
+        uri = "ws://your-exchange-domain/ws"
+        async with websockets.connect(uri) as websocket:
+            print("Connected to Exchange WebSocket")
+            
+            # Send subscription
+            subscribe_msg = {
+                "method": "SUBSCRIBE",
+                "params": ["trade.BTC_USDT"],
+                "id": 1
+            }
+            await websocket.send(json.dumps(subscribe_msg))
+            
+            # Receive messages
+            async for message in websocket:
+                data = json.loads(message)
+                print(f"Received: {data}")
+
+    asyncio.run(connect())
+    ```
+
+    ```rust Rust
+    use tokio_tungstenite::connect_async;
+    use futures_util::{StreamExt, SinkExt};
+    use tokio_tungstenite::tungstenite::Message;
+
+    #[tokio::main]
+    async fn main() {
+        let url = "ws://your-exchange-domain/ws";
+        let (ws_stream, _) = connect_async(url)
+            .await
+            .expect("Failed to connect");
+        
+        println!("Connected to Exchange WebSocket");
+        
+        let (mut write, mut read) = ws_stream.split();
+        
+        // Send subscription
+        let subscribe = r#"{"method":"SUBSCRIBE","params":["trade.BTC_USDT"],"id":1}"#;
+        write.send(Message::Text(subscribe.to_string())).await.unwrap();
+        
+        // Receive messages
+        while let Some(msg) = read.next().await {
+            if let Ok(Message::Text(text)) = msg {
+                println!("Received: {}", text);
+            }
+        }
+    }
+    ```
+    </CodeGroup>
+  </Step>
+
+  <Step title="Send subscription messages">
+    After connecting, send subscription requests to start receiving market data. See the [Subscriptions](/api/websocket/subscriptions) page for details.
+  </Step>
+
+  <Step title="Receive real-time updates">
+    The server will push updates to you as they occur. Messages are sent as text frames containing JSON data.
+  </Step>
+</Steps>
+
+## Message format
+
+### Client messages
+
+All messages sent from the client to the server must be JSON objects with the following structure:
+
+```json
+{
+  "method": "SUBSCRIBE" | "UNSUBSCRIBE",
+  "params": ["stream_name"],
+  "id": 1
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `method` | string | The action to perform: `SUBSCRIBE` or `UNSUBSCRIBE` |
+| `params` | array | Array of stream identifiers to subscribe/unsubscribe |
+| `id` | number | Request identifier for tracking |
+
+### Server messages
+
+The server sends updates as JSON objects with this structure:
+
+```json
+{
+  "stream": "trade.BTC_USDT",
+  "data": {
+    "e": "trade",
+    "s": "BTC_USDT",
+    "E": 1727866324128584,
+    "T": 1727866324088922,
+    "U": 4977146,
+    "a": [["1.0003", "0"]],
+    "b": []
+  }
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `stream` | string | The stream identifier this data belongs to |
+| `data` | object | The actual market data (format varies by stream type) |
+
+## Connection management
+
+### Closing connections
+
+To gracefully close the connection, send a WebSocket close frame. The server will:
+
+1. Remove you from all subscriptions
+2. Clean up your user session
+3. Acknowledge the close
+
+<CodeGroup>
+```javascript JavaScript
+ws.close();
+```
+
+```python Python
+await websocket.close()
+```
+
+```rust Rust
+write.close().await.unwrap();
+```
+</CodeGroup>
+
+### Error handling
+
+The server handles various error scenarios:
+
+<Note>
+  **Protocol errors**: Invalid WebSocket frames will log a protocol error and close the connection.
+</Note>
+
+<Note>
+  **Connection errors**: Network issues or unexpected disconnections will trigger automatic cleanup of your subscriptions.
+</Note>
+
+<Note>
+  **Invalid messages**: Non-JSON or improperly formatted messages are silently ignored. Ensure your messages match the expected format.
+</Note>
+
+### Reconnection strategy
+
+If your connection drops, implement a reconnection strategy:
+
+```javascript
+function connect() {
+  const ws = new WebSocket('ws://your-exchange-domain/ws');
+  
+  ws.onclose = () => {
+    console.log('Connection lost. Reconnecting in 5 seconds...');
+    setTimeout(connect, 5000);
+  };
+  
+  ws.onopen = () => {
+    console.log('Connected');
+    // Re-subscribe to your streams
+    ws.send(JSON.stringify({
+      method: 'SUBSCRIBE',
+      params: ['trade.BTC_USDT'],
+      id: 1
+    }));
+  };
+  
+  return ws;
+}
+
+const ws = connect();
+```
+
+## Architecture notes
+
+The WebSocket server:
+
+- Uses Redis Pub/Sub for distributing market data updates
+- Maintains user subscriptions in memory for fast routing
+- Automatically unsubscribes from Redis channels when no users are listening
+- Identifies users by their connection address
+- Supports multiple concurrent connections
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Subscriptions" icon="bell" href="/api/websocket/subscriptions">
+    Learn about available data streams and how to subscribe
+  </Card>
+  <Card title="REST API" icon="code" href="/api/overview">
+    Explore the REST API for account management and trading
+  </Card>
+</CardGroup>

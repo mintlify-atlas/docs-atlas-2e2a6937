@@ -1,0 +1,430 @@
+---
+title: Architecture
+description: Understanding the Exchange system design and components
+---
+
+# Architecture
+
+Exchange is built with a microservices architecture where specialized components handle different aspects of the trading system. This design ensures high performance, fault tolerance, and scalability.
+
+## System overview
+
+The exchange consists of four main components that communicate via Redis pub/sub:
+
+```
+┌─────────────┐
+│   Clients   │
+│ (REST/WS)   │
+└──────┬──────┘
+       │
+       ▼
+┌─────────────┐      ┌─────────────┐
+│   Router    │◄────►│    Redis    │
+│  (API Layer)│      │  (Pub/Sub)  │
+└─────────────┘      └──────┬──────┘
+                            │
+       ┌────────────────────┼────────────────────┐
+       │                    │                    │
+       ▼                    ▼                    ▼
+┌─────────────┐      ┌─────────────┐     ┌─────────────┐
+│   Engine    │      │  WS Stream  │     │DB Processor │
+│  (Matching) │      │  (Real-time)│     │  (Storage)  │
+└─────────────┘      └─────────────┘     └──────┬──────┘
+                                                 │
+                                                 ▼
+                                          ┌─────────────┐
+                                          │  Postgres   │
+                                          │ (Persistent)│
+                                          └─────────────┘
+```
+
+## Core components
+
+<CardGroup cols={2}>
+  <Card title="Router" icon="route">
+    **REST & WebSocket API layer**
+    
+    Handles all incoming HTTP requests and routes them to the appropriate service via Redis queues.
+  </Card>
+  
+  <Card title="Engine" icon="gears">
+    **Order matching engine**
+    
+    Maintains in-memory order books and executes trades using price-time priority matching.
+  </Card>
+  
+  <Card title="WS Stream" icon="wifi">
+    **Real-time data streaming**
+    
+    Manages WebSocket connections and pushes live market data updates to subscribed clients.
+  </Card>
+  
+  <Card title="DB Processor" icon="database">
+    **Asynchronous persistence**
+    
+    Processes database writes asynchronously to avoid blocking the critical trading path.
+  </Card>
+</CardGroup>
+
+## Component details
+
+### Router
+
+The router is built with Actix Web and serves as the main entry point for all client requests.
+
+**Location:** `crates/router/src/main.rs`
+
+**Key responsibilities:**
+- Accept HTTP requests on `/api/v1/*` endpoints
+- Validate and parse request payloads
+- Push messages to Redis queues for processing
+- Return responses from Redis pub/sub
+- Serve market data directly from Postgres (for historical data)
+
+**Main endpoints:**
+
+```rust
+// Order management
+POST   /api/v1/order      // Create/execute order
+GET    /api/v1/order      // Get order status
+DELETE /api/v1/order      // Cancel order
+GET    /api/v1/orders     // Get open orders
+DELETE /api/v1/orders     // Cancel all orders
+
+// Market data
+GET    /api/v1/depth      // Order book depth
+GET    /api/v1/trades     // Recent trades
+GET    /api/v1/tickers    // Ticker data
+GET    /api/v1/klines     // Candlestick data
+
+// User management
+POST   /api/v1/users      // Create user
+```
+
+**Implementation:**
+
+```rust
+let server = HttpServer::new(move || {
+    App::new()
+        .wrap(Cors::default()
+            .allow_any_origin()
+            .allow_any_header()
+            .allow_any_method())
+        .service(
+            scope("/api/v1")
+                .app_data(app_state.clone())
+                .service(scope("/order")
+                    .route("", web::post().to(order::execute_order))
+                    .route("", web::get().to(order::get_open_order))
+                    .route("", web::delete().to(order::cancel_order)))
+                // ... more routes
+        )
+})
+.bind(config.server_addr.clone())?
+.run();
+```
+
+### Engine
+
+The matching engine is the heart of the exchange, responsible for maintaining order books and executing trades.
+
+**Location:** `crates/engine/src/main.rs`
+
+**Key responsibilities:**
+- Maintain in-memory order books for all trading pairs
+- Track user balances in-memory
+- Execute orders using price-time priority
+- Validate user balances before order placement
+- Generate fill notifications
+- Publish trade executions to Redis
+
+**Data structures:**
+
+```rust
+struct Engine {
+    orderbooks: Vec<Orderbook>,
+    balances: BTreeMap<String, UserBalances>,
+}
+
+struct Orderbook {
+    bids: BTreeMap<Decimal, Vec<Order>>,  // Buy orders (descending price)
+    asks: BTreeMap<Decimal, Vec<Order>>,  // Sell orders (ascending price)
+    asset_pair: AssetPair,
+    last_update_id: i64,
+}
+
+struct Order {
+    order_id: String,
+    user_id: String,
+    symbol: String,        // e.g., SOL_USDC
+    side: String,          // Buy/Sell
+    order_type: String,    // Limit/Market
+    order_status: String,
+    quantity: Decimal,
+    filled_quantity: Decimal,
+    price: Decimal,
+    timestamp: i64,
+}
+
+struct UserBalances {
+    user_id: String,
+    balance: HashMap<Asset, Amount>,
+}
+
+struct Amount {
+    available: Decimal,
+    locked: Decimal,
+}
+```
+
+**Order processing flow:**
+
+<Steps>
+  <Step title="Receive order from Redis">
+    The engine continuously pops orders from the Redis `ORDERS` queue.
+  </Step>
+
+  <Step title="Validate user balance">
+    Check if the user has sufficient balance (available + locked amounts).
+  </Step>
+
+  <Step title="Lock user funds">
+    Move the required amount from `available` to `locked` balance.
+  </Step>
+
+  <Step title="Attempt to match">
+    Search the opposite side of the order book for matching orders:
+    - For buy orders: check asks (sell orders)
+    - For sell orders: check bids (buy orders)
+  </Step>
+
+  <Step title="Execute trades">
+    If matches are found:
+    - Update filled quantities
+    - Update user balances
+    - Generate fill events
+    - Remove fully filled orders
+  </Step>
+
+  <Step title="Add to order book">
+    If not fully filled, add the remaining quantity to the order book.
+  </Step>
+
+  <Step title="Publish updates">
+    Publish trade executions and order book updates via Redis pub/sub.
+  </Step>
+</Steps>
+
+**Implementation:**
+
+```rust
+#[tokio::main]
+async fn main() {
+    let redis_connection = Arc::new(RedisManager::new().await.unwrap());
+    let postgres = PostgresDb::new().await.unwrap();
+    let pg_pool = postgres.get_pg_connection().unwrap();
+    
+    let engine = Arc::new(Mutex::new(Engine::new()));
+    engine.lock().await.init_engine(&pg_pool).await;
+
+    // Spawn concurrent tasks for order and user processing
+    let orders_handle = task::spawn(async move {
+        loop {
+            match redis_connection
+                .pop(RedisQueues::ORDERS.to_string().as_str(), Some(1))
+                .await
+            {
+                Ok(data) => {
+                    if data.len() > 0 {
+                        let mut engine = engine.lock().await;
+                        handle_order(data, &redis_connection, &mut engine).await;
+                    }
+                }
+                Err(error) => {
+                    println!("Error: {:?}", error);
+                }
+            }
+        }
+    });
+
+    orders_handle.await.unwrap();
+}
+```
+
+### WS Stream
+
+The WebSocket server manages real-time connections and pushes market data updates to subscribed clients.
+
+**Location:** `crates/ws-stream/src/main.rs`
+
+**Key responsibilities:**
+- Accept WebSocket connections from clients
+- Handle subscribe/unsubscribe requests
+- Listen to Redis pub/sub channels
+- Push updates to subscribed clients
+- Manage connection lifecycle
+
+**Subscription types:**
+- `depth@{SYMBOL}` - Order book depth updates
+- `trades@{SYMBOL}` - Real-time trade executions
+- `ticker@{SYMBOL}` - Ticker data updates
+
+**Implementation:**
+
+```rust
+#[tokio::main]
+async fn main() -> Result<(), Error> {
+    let addr = std::env::var("WS_STREAM_URL")
+        .expect("WS_STREAM_URL must be set");
+    
+    let listener = TcpListener::bind(&addr).await
+        .expect("Failed to bind");
+    
+    let ws_manager = Arc::new(Mutex::new(WsManager::new().await));
+    
+    // Spawn Redis message processor
+    let ws_manager_clone = ws_manager.clone();
+    thread::spawn(move || {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(process_redis_message(ws_manager_clone));
+    });
+    
+    // Accept WebSocket connections
+    while let Ok((stream, _)) = listener.accept().await {
+        tokio::spawn(accept_connection(stream, ws_manager.clone()));
+    }
+    
+    Ok(())
+}
+```
+
+### DB Processor
+
+The database processor handles all Postgres writes asynchronously to keep the critical path fast.
+
+**Location:** `crates/db-processor/src/main.rs`
+
+**Key responsibilities:**
+- Pop database update messages from Redis
+- Write trade executions to Postgres
+- Update user balances in persistent storage
+- Store order book snapshots
+- Handle kline (candlestick) updates
+
+**Implementation:**
+
+```rust
+#[tokio::main]
+async fn main() {
+    let redis_connection = RedisManager::new().await.unwrap();
+    let postgres = PostgresDb::new().await.unwrap();
+    let pg_pool = postgres.get_pg_connection().unwrap();
+    
+    loop {
+        match redis_connection
+            .pop(RedisQueues::DATABASE.to_string().as_str(), Some(1))
+            .await
+        {
+            Ok(data) => {
+                if data.len() > 0 {
+                    handle_db_updates(data, &pg_pool).await;
+                }
+            }
+            Err(error) => {
+                println!("Error popping from Redis: {:?}", error);
+            }
+        }
+    }
+}
+```
+
+## Data flow
+
+Here's how data flows through the system for a typical order placement:
+
+<Steps>
+  <Step title="Client sends order">
+    Client sends a POST request to `/api/v1/order` with order details.
+  </Step>
+
+  <Step title="Router validates and queues">
+    Router validates the request and pushes it to Redis `ORDERS` queue.
+  </Step>
+
+  <Step title="Engine processes order">
+    Engine pops the order from Redis, validates balances, and attempts to match it.
+  </Step>
+
+  <Step title="Trade execution">
+    If matched, the engine:
+    - Updates in-memory balances
+    - Publishes trade events to Redis
+    - Sends order book updates to Redis
+  </Step>
+
+  <Step title="WebSocket broadcast">
+    WS Stream receives trade events from Redis and broadcasts to subscribed clients.
+  </Step>
+
+  <Step title="Database persistence">
+    DB Processor receives trade data from Redis and writes to Postgres asynchronously.
+  </Step>
+
+  <Step title="Response to client">
+    Router receives the order result from Redis pub/sub and returns it to the client.
+  </Step>
+</Steps>
+
+## Redis queues and channels
+
+Redis serves as the communication backbone:
+
+**Queues (LPUSH/RPOP):**
+- `ORDERS` - Order creation, cancellation requests
+- `USERS` - User creation, balance updates
+- `DATABASE` - Asynchronous database write requests
+
+**Pub/Sub channels:**
+- `depth:{SYMBOL}` - Order book updates
+- `trades:{SYMBOL}` - Trade executions
+- `ticker:{SYMBOL}` - Ticker updates
+
+## Performance characteristics
+
+<Note>
+  The in-memory architecture enables sub-10ms order execution, but requires careful memory management for production deployments.
+</Note>
+
+**Latency breakdown:**
+- Order validation: < 1ms
+- Matching engine: < 5ms
+- Balance updates: < 1ms
+- Redis pub/sub: < 2ms
+- WebSocket push: < 1ms
+
+**Total order-to-execution:** < 10ms
+
+<Warning>
+  Database writes are asynchronous and do not block order execution. However, ensure the DB processor can keep up with your write volume to avoid Redis queue buildup.
+</Warning>
+
+## Scalability considerations
+
+For production deployments:
+
+1. **Horizontal scaling:** Run multiple router instances behind a load balancer
+2. **Engine sharding:** Partition order books by trading pair across multiple engine instances
+3. **Redis clustering:** Use Redis Cluster for high availability
+4. **Database replication:** Set up Postgres read replicas for market data queries
+5. **WebSocket scaling:** Use Redis pub/sub to coordinate updates across multiple WS servers
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="API reference" icon="code" href="/api/overview">
+    Explore all available endpoints
+  </Card>
+  <Card title="Deployment" icon="rocket" href="/deployment/local-development">
+    Learn how to deploy to production
+  </Card>
+</CardGroup>

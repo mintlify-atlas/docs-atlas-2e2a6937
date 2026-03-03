@@ -1,0 +1,88 @@
+---
+title: Cancel order
+description: Cancel a specific open order
+---
+
+Cancels a specific open order by removing it from the order book. The order must belong to the specified user and match the provided price and side.
+
+## Endpoint
+
+<Note>DELETE /api/v1/order</Note>
+
+## Request
+
+### Body parameters
+
+<ParamField path="order_id" type="string" required>
+  The unique identifier of the order to cancel
+</ParamField>
+
+<ParamField path="user_id" type="string" required>
+  The unique identifier of the user who owns the order
+</ParamField>
+
+<ParamField path="price" type="decimal" required>
+  The price of the order to cancel (must match the original order)
+</ParamField>
+
+<ParamField path="side" type="string" required>
+  The order side ("BUY" or "SELL") - must match the original order
+</ParamField>
+
+<ParamField path="market" type="string" required>
+  The trading pair market (e.g., "SOL_USDC", "BTC_USDT")
+</ParamField>
+
+## Response
+
+### Success response
+
+<ResponseField name="status" type="string">
+  Status message indicating the order was cancelled
+</ResponseField>
+
+<ResponseField name="order_id" type="string">
+  The unique identifier of the cancelled order
+</ResponseField>
+
+### Error response
+
+<ResponseField name="status" type="string">
+  Status message indicating the order cancellation failed
+</ResponseField>
+
+## Example
+
+```bash
+curl -X DELETE http://localhost:8080/api/v1/order \
+  -H "Content-Type: application/json" \
+  -d '{
+    "order_id": "550e8400-e29b-41d4-a716-446655440000",
+    "user_id": "user123",
+    "price": "150.50",
+    "side": "BUY",
+    "market": "SOL_USDC"
+  }'
+```
+
+**Success response:**
+
+```json
+{
+  "status": "Cancelled Order",
+  "order_id": "550e8400-e29b-41d4-a716-446655440000"
+}
+```
+
+**Error response:**
+
+```json
+{
+  "status": "Failed to Cancel Order"
+}
+```
+
+## Error codes
+
+- **200 OK** - Order cancelled successfully
+- **500 Internal Server Error** - Failed to cancel the order or Redis connection error

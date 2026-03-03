@@ -1,0 +1,86 @@
+---
+title: Introduction
+description: A high-performance centralized cryptocurrency exchange built in Rust
+---
+
+# Exchange
+
+Exchange is a low-latency centralized cryptocurrency exchange designed for high-frequency trading (HFT). Built in Rust, it features an in-memory order book, real-time WebSocket updates, and an optimized backend powered by Redis and Postgres for maximum efficiency.
+
+<CardGroup cols={3}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Get started with Exchange in minutes
+  </Card>
+  <Card title="Architecture" icon="sitemap" href="/architecture">
+    Learn about the system architecture
+  </Card>
+  <Card title="API reference" icon="code" href="/api/overview">
+    Explore the REST and WebSocket APIs
+  </Card>
+</CardGroup>
+
+## Key features
+
+Exchange is designed for speed, reliability, and scalability. Here are the key features that make it production-ready:
+
+<CardGroup cols={2}>
+  <Card title="Ultra-fast order matching" icon="bolt">
+    Sub-10ms order execution with an optimized matching engine that processes orders using price-time priority
+  </Card>
+  <Card title="In-memory order book & balances" icon="database">
+    All order books and user balances are stored in-memory for low latency and high throughput
+  </Card>
+  <Card title="Real-time WebSockets" icon="wifi">
+    Live updates for market depth, trades, and tickers pushed to connected clients in real-time
+  </Card>
+  <Card title="Advanced matching engine" icon="gears">
+    Optimized price-time priority algorithm ensures fair and efficient order execution
+  </Card>
+  <Card title="Fault-tolerant architecture" icon="shield">
+    Redis-backed pub/sub for message queuing and Postgres for persistent storage ensure data durability
+  </Card>
+  <Card title="Efficient API layer" icon="plug">
+    RESTful HTTP and WebSocket APIs for seamless integration with trading clients and web interfaces
+  </Card>
+</CardGroup>
+
+## Tech stack
+
+Exchange is built with modern, high-performance technologies:
+
+- **[Rust](https://www.rust-lang.org/)** – Core language for speed and memory safety
+- **[Redis](https://redis.io/)** – High-speed pub/sub and caching layer
+- **[Postgres](https://www.postgresql.org/)** – Persistent storage for trade history and user balances
+- **[Tokio](https://tokio.rs/)** – Asynchronous runtime for high-performance networking
+- **[Actix](https://actix.rs/)** – Web framework for API handling
+- **[Tokio-Tungstenite](https://github.com/snapview/tokio-tungstenite)** – WebSocket implementation for real-time data streaming
+- **[Serde](https://serde.rs/)** – Serialization/deserialization of structured data
+- **[SQLx](https://github.com/launchbadge/sqlx)** – Async database interaction with compile-time query verification
+- **[Fred](https://github.com/aembke/fred.rs)** – Efficient Redis client for pub/sub messaging
+
+## Performance
+
+The exchange achieves sub-10ms order execution latency by:
+
+- Maintaining all order books and balances in-memory
+- Using Rust's zero-cost abstractions for optimal performance
+- Processing orders asynchronously with Tokio
+- Leveraging Redis for fast inter-process communication
+- Decoupling database writes from the critical path
+
+<Note>
+  The exchange uses an in-memory architecture for speed. Make sure you have adequate RAM for your trading volumes and consider implementing proper backup strategies.
+</Note>
+
+## Use cases
+
+Exchange is ideal for:
+
+- **Cryptocurrency trading platforms** requiring low-latency order execution
+- **High-frequency trading (HFT)** systems that need sub-10ms performance
+- **Market makers** who need fast order placement and cancellation
+- **Educational purposes** to learn how exchanges work under the hood
+
+## Open source
+
+Exchange is open-source under the MIT License. You can find the source code on [GitHub](https://github.com/jogeshwar01/exchange).

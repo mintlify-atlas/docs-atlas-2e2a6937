@@ -1,0 +1,233 @@
+---
+title: Authentication
+description: How to authenticate with the Exchange API
+---
+
+## Overview
+
+The current Exchange API implementation **does not require authentication** for most endpoints. This is a simplified setup intended for development and testing.
+
+<Note>
+In a production environment, you should implement proper authentication using JWT tokens, API keys, or session-based authentication.
+</Note>
+
+## User identification
+
+Endpoints that require user identification accept a `user_id` parameter in the request body:
+
+```json Example order request
+{
+  "market": "SOL_USDC",
+  "price": "150.50",
+  "quantity": "10.0",
+  "side": "BUY",
+  "user_id": "user-123"
+}
+```
+
+### User creation
+
+The `/api/v1/users` endpoint generates a new user with a UUID:
+
+```http
+POST /api/v1/users
+```
+
+**Response:**
+
+```json
+{
+  "user_id": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+  "balances": [
+    {
+      "asset": "USDC",
+      "available": "10000.00",
+      "locked": "0.00"
+    },
+    {
+      "asset": "SOL",
+      "available": "100.00",
+      "locked": "0.00"
+    }
+  ]
+}
+```
+
+<Info>
+The code comment in `router/src/routes/user.rs:16` notes that the user ID would ideally be fetched from cookies or JWT in a production system.
+</Info>
+
+## Public endpoints
+
+The following endpoints do not require user identification and are publicly accessible:
+
+<CardGroup cols={2}>
+  <Card title="Health check" icon="heart-pulse">
+    `GET /api/v1/health`
+  </Card>
+  
+  <Card title="Market depth" icon="chart-column">
+    `GET /api/v1/depth`
+  </Card>
+  
+  <Card title="Trade history" icon="arrow-right-arrow-left">
+    `GET /api/v1/trades`
+  </Card>
+  
+  <Card title="Klines data" icon="chart-line">
+    `GET /api/v1/klines`
+  </Card>
+  
+  <Card title="Ticker data" icon="gauge">
+    `GET /api/v1/tickers`
+  </Card>
+</CardGroup>
+
+## Authenticated endpoints
+
+The following endpoints require a `user_id` in the request body:
+
+### Order management
+
+**Execute order:**
+
+```http
+POST /api/v1/order
+```
+
+```json Request body
+{
+  "market": "SOL_USDC",
+  "price": "150.50",
+  "quantity": "10.0",
+  "side": "BUY",
+  "user_id": "user-123"
+}
+```
+
+**Get open order:**
+
+```http
+GET /api/v1/order
+```
+
+```json Request body
+{
+  "user_id": "user-123",
+  "order_id": "order-456",
+  "market": "SOL_USDC"
+}
+```
+
+**Cancel order:**
+
+```http
+DELETE /api/v1/order
+```
+
+```json Request body
+{
+  "order_id": "order-456",
+  "user_id": "user-123",
+  "price": "150.50",
+  "side": "BUY",
+  "market": "SOL_USDC"
+}
+```
+
+**Get all open orders:**
+
+```http
+GET /api/v1/orders
+```
+
+```json Request body
+{
+  "user_id": "user-123",
+  "market": "SOL_USDC"
+}
+```
+
+**Cancel all orders:**
+
+```http
+DELETE /api/v1/orders
+```
+
+```json Request body
+{
+  "user_id": "user-123",
+  "market": "SOL_USDC"
+}
+```
+
+## Error responses
+
+### Missing user ID
+
+If you attempt to call an authenticated endpoint without providing a `user_id`, the request will fail during deserialization:
+
+```json Error response
+{
+  "error": "Bad Request"
+}
+```
+
+### Invalid user ID
+
+If you provide a `user_id` that doesn't exist in the system, the order processing service will reject the request:
+
+```json Error response
+{
+  "error": "User not found"
+}
+```
+
+## CORS configuration
+
+The API is configured with permissive CORS settings allowing requests from any origin:
+
+```rust
+Cors::default()
+    .allow_any_origin()
+    .allow_any_header()
+    .allow_any_method()
+    .max_age(3600)
+```
+
+This is suitable for development but should be restricted in production environments.
+
+## Future authentication
+
+For production deployment, consider implementing:
+
+<CardGroup cols={2}>
+  <Card title="JWT tokens" icon="key">
+    Issue tokens on login and validate on each request
+  </Card>
+  
+  <Card title="API keys" icon="shield">
+    Generate API keys for programmatic access
+  </Card>
+  
+  <Card title="Session cookies" icon="cookie">
+    Use secure HTTP-only cookies for web clients
+  </Card>
+  
+  <Card title="OAuth 2.0" icon="lock">
+    Integrate with third-party identity providers
+  </Card>
+</CardGroup>
+
+## Security considerations
+
+<Info>
+The current implementation is designed for development and testing. Before deploying to production:
+
+- Implement proper authentication and authorization
+- Restrict CORS to trusted origins
+- Use HTTPS for all API communication
+- Implement rate limiting per user
+- Add request signing for critical operations
+- Validate all user inputs thoroughly
+</Info>

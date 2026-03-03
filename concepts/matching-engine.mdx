@@ -1,0 +1,245 @@
+---
+title: Matching engine
+description: Understand how the Exchange matching engine processes orders and executes trades in-memory
+---
+
+The matching engine is the core component of the Exchange that processes incoming orders, matches buyers with sellers, and executes trades. It operates entirely in-memory for ultra-low latency, ensuring orders are matched according to price-time priority.
+
+## Engine architecture
+
+The `Engine` struct manages all orderbooks and user balances across different trading pairs:
+
+```rust engine.rs
+pub struct Engine {
+    pub orderbooks: Vec<OrderBook>,
+    pub balances: HashMap<String, Mutex<UserBalances>>,
+}
+```
+
+Each engine instance can support multiple trading pairs (e.g., SOL_USDC, BTC_USDT), with each pair having its own orderbook. User balances are stored in a thread-safe HashMap using Mutex for concurrent access.
+
+## Order processing flow
+
+When a new order arrives, the engine follows a structured workflow to ensure proper execution:
+
+<Accordion title="Step 1: Fund validation and locking">
+Before processing any order, the engine validates that the user has sufficient funds and locks them to prevent double-spending:
+
+```rust engine.rs
+pub fn check_and_lock_funds(&mut self, order: &CreateOrder) -> Result<(), &str> {
+    let user_balance_mutex = self
+        .balances
+        .get_mut(&order.user_id)
+        .ok_or("No matching user found")?;
+
+    let mut user_balance = user_balance_mutex.lock()
+        .map_err(|_| "Mutex lock failed")?;
+
+    match order.side {
+        OrderSide::BUY => {
+            let balance = user_balance.balance.get_mut(&quote_asset)
+                .ok_or("No balance for asset found")?;
+
+            let total_cost = order.price * order.quantity;
+            if balance.available >= total_cost {
+                balance.available -= total_cost;
+                balance.locked += total_cost;
+            } else {
+                return Err("Insufficient funds");
+            }
+        }
+        OrderSide::SELL => {
+            let balance = user_balance.balance.get_mut(&base_asset)
+                .ok_or("No balance for asset found")?;
+
+            if balance.available >= order.quantity {
+                balance.available -= order.quantity;
+                balance.locked += order.quantity;
+            } else {
+                return Err("Insufficient asset quantity");
+            }
+        }
+    }
+
+    Ok(())
+}
+```
+
+For buy orders, the engine locks the quote asset (e.g., USDC). For sell orders, it locks the base asset (e.g., SOL).
+</Accordion>
+
+<Accordion title="Step 2: Orderbook matching">
+After funds are locked, the order is sent to the appropriate orderbook for matching:
+
+```rust engine.rs
+let order = Order {
+    price: input_order.price,
+    quantity: input_order.quantity,
+    filled_quantity: dec!(0),
+    order_id: order_id.clone(),
+    user_id: input_order.user_id.clone(),
+    side: input_order.side,
+    order_type: OrderType::MARKET,
+    order_status: OrderStatus::Pending,
+    timestamp: chrono::Utc::now().timestamp_millis(),
+};
+
+let order_result: ProcessOrderResult = orderbook.process_order(order.clone());
+```
+
+The orderbook attempts to match the order against existing orders. Any unfilled quantity remains on the book.
+</Accordion>
+
+<Accordion title="Step 3: Balance settlement">
+Once matching is complete, the engine updates balances for both parties involved in each trade:
+
+```rust engine.rs
+match order.side {
+    OrderSide::BUY => {
+        for fill in &order_result.fills {
+            // Update buyer's balances (current user)
+            self.update_balance_with_lock(
+                order.user_id.clone(),
+                base_asset.clone(),
+                fill.quantity,
+                AmountType::AVAILABLE,
+            )?;
+            self.update_balance_with_lock(
+                order.user_id.clone(),
+                quote_asset.clone(),
+                -(fill.price * fill.quantity),
+                AmountType::LOCKED,
+            )?;
+
+            // Update seller's balances (other user)
+            self.update_balance_with_lock(
+                fill.other_user_id.clone(),
+                quote_asset.clone(),
+                fill.price * fill.quantity,
+                AmountType::AVAILABLE,
+            )?;
+            self.update_balance_with_lock(
+                fill.other_user_id.clone(),
+                base_asset.clone(),
+                -fill.quantity,
+                AmountType::LOCKED,
+            )?;
+        }
+    }
+    // SELL side follows similar pattern
+}
+```
+
+For each fill, the buyer receives the base asset and the seller receives the quote asset.
+</Accordion>
+
+<Accordion title="Step 4: Database and WebSocket updates">
+Finally, the engine persists trades to the database and broadcasts updates to WebSocket subscribers:
+
+```rust engine.rs
+// Persist order updates to database
+self.update_db_orders(
+    order.clone(),
+    order_result.executed_quantity,
+    &order_result.fills,
+    redis_conn,
+).await;
+
+// Create trade records
+self.create_db_trades(
+    input_order.user_id.clone(),
+    input_order.market.clone(),
+    &order_result.fills,
+    redis_conn,
+).await;
+
+// Broadcast trade events via WebSocket
+self.publish_ws_trades(
+    input_order.market.clone(),
+    input_order.user_id.clone(),
+    &order_result.fills,
+    order.timestamp,
+    redis_conn,
+).await;
+
+// Broadcast orderbook depth updates
+self.publish_ws_depth_updates(
+    input_order.market.clone(),
+    order.price,
+    order.side,
+    &order_result.fills,
+    redis_conn,
+).await;
+```
+</Accordion>
+
+## Price-time priority matching
+
+The Exchange implements the industry-standard price-time priority algorithm:
+
+1. **Price priority**: Orders with better prices are matched first
+   - For buy orders: Higher prices get priority
+   - For sell orders: Lower prices get priority
+
+2. **Time priority**: Among orders at the same price level, earlier orders are matched first
+   - Orders are stored in vectors, maintaining insertion order
+   - The orderbook iterates through orders sequentially
+
+<Note>
+The matching engine processes orders atomically. Once funds are locked and matching begins, the operation either completes fully or rolls back on error.
+</Note>
+
+## Order cancellation
+
+Users can cancel open orders, which unlocks their reserved funds:
+
+```rust engine.rs
+pub fn cancel_order(&mut self, cancel_order: CancelOrder) -> Result<String, &str> {
+    let result = orderbook.cancel_order(cancel_order);
+
+    match result {
+        Ok(order) => {
+            let quantity = match order.side {
+                OrderSide::BUY => (order.quantity - order.filled_quantity) * order.price,
+                OrderSide::SELL => order.quantity - order.filled_quantity,
+            };
+
+            match order.side {
+                OrderSide::BUY => {
+                    self.update_balance_with_lock(
+                        order.user_id.clone(),
+                        quote_asset.clone(),
+                        quantity,
+                        AmountType::AVAILABLE,
+                    )?;
+                    self.update_balance_with_lock(
+                        order.user_id.clone(),
+                        quote_asset.clone(),
+                        -quantity,
+                        AmountType::LOCKED,
+                    )?;
+                }
+                // SELL side follows similar pattern
+            }
+
+            Ok(cancel_order_id)
+        }
+        Err(()) => Err("Failed to cancel order")
+    }
+}
+```
+
+Cancelling an order removes it from the orderbook and transfers the locked funds back to the user's available balance.
+
+<Tip>
+The engine also supports cancelling all orders for a user with `cancel_all_orders()`, which processes multiple cancellations in a single operation.
+</Tip>
+
+## Performance characteristics
+
+- **In-memory execution**: All matching operations occur in RAM with no I/O during the critical path
+- **Thread safety**: Mutex-protected balance maps enable concurrent order processing
+- **Async I/O**: Database writes and Redis publishes happen asynchronously after matching completes
+- **Atomic operations**: Fund locking prevents race conditions and ensures consistency
+
+The separation of matching logic from persistence allows the engine to achieve microsecond-level latency for order processing.

@@ -1,0 +1,105 @@
+---
+title: Get 24-hour ticker data
+description: Retrieve 24-hour rolling window price statistics for all trading pairs
+---
+
+Returns 24-hour rolling window statistics for all active trading pairs. This endpoint provides a comprehensive overview of market activity across the exchange.
+
+## Endpoint
+
+```
+GET /api/v1/tickers
+```
+
+## Query parameters
+
+This endpoint does not accept any query parameters. It returns data for all trading pairs.
+
+## Response
+
+Returns an array of ticker objects, one for each trading pair, sorted alphabetically by symbol.
+
+<ResponseField name="symbol" type="string">
+  Trading pair symbol (uses camelCase format in response)
+</ResponseField>
+
+<ResponseField name="firstPrice" type="string">
+  First trade price in the 24-hour window (uses camelCase format in response)
+</ResponseField>
+
+<ResponseField name="lastPrice" type="string">
+  Most recent trade price (uses camelCase format in response)
+</ResponseField>
+
+<ResponseField name="high" type="string">
+  Highest trade price in the 24-hour window
+</ResponseField>
+
+<ResponseField name="low" type="string">
+  Lowest trade price in the 24-hour window
+</ResponseField>
+
+<ResponseField name="priceChange" type="string">
+  Absolute price change over the 24-hour window (lastPrice - firstPrice) (uses camelCase format in response)
+</ResponseField>
+
+<ResponseField name="priceChangePercent" type="string">
+  Percentage price change over the 24-hour window (uses camelCase format in response)
+</ResponseField>
+
+<ResponseField name="volume" type="string">
+  Total volume traded in the 24-hour window (in base asset)
+</ResponseField>
+
+<ResponseField name="quoteVolume" type="string">
+  Total volume traded in the 24-hour window (in quote asset, i.e., price × quantity) (uses camelCase format in response)
+</ResponseField>
+
+<ResponseField name="trades" type="string">
+  Total number of trades executed in the 24-hour window
+</ResponseField>
+
+## Example request
+
+```bash
+curl -X GET "http://localhost:3000/api/v1/tickers"
+```
+
+## Example response
+
+```json
+[
+  {
+    "symbol": "BTC_USDT",
+    "firstPrice": "42500.00",
+    "lastPrice": "43250.50",
+    "high": "43500.00",
+    "low": "42300.00",
+    "priceChange": "750.50",
+    "priceChangePercent": "1.766",
+    "volume": "152.45",
+    "quoteVolume": "6587234.25",
+    "trades": "4523"
+  },
+  {
+    "symbol": "SOL_USDC",
+    "firstPrice": "150.25",
+    "lastPrice": "151.80",
+    "high": "152.50",
+    "low": "149.80",
+    "priceChange": "1.55",
+    "priceChangePercent": "1.031",
+    "volume": "8934.5",
+    "quoteVolume": "1348725.30",
+    "trades": "2341"
+  }
+]
+```
+
+## Notes
+
+- The 24-hour window is calculated as a rolling window from the current time
+- Only trading pairs with at least one trade in the last 24 hours are included
+- All numeric values are returned as strings to preserve decimal precision
+- Response field names use camelCase format (e.g., `firstPrice`, `priceChange`) as specified by the `#[serde(rename_all = "camelCase")]` attribute in the backend
+- Statistics are aggregated using PostgreSQL window functions for optimal performance

@@ -1,0 +1,82 @@
+---
+title: Get order book depth
+description: Retrieve the current order book depth for a trading pair
+---
+
+Returns the current state of the order book, including all bids and asks with their respective price levels and quantities.
+
+## Endpoint
+
+```
+GET /api/v1/depth
+```
+
+## Query parameters
+
+<ParamField query="symbol" type="string" required>
+  Trading pair symbol (e.g., `SOL_USDC`, `BTC_USDT`)
+</ParamField>
+
+## Response
+
+<ResponseField name="bids" type="array">
+  Array of bid orders in the order book. Each bid is represented as a tuple of `[price, quantity]`.
+  
+  <Expandable title="Bid structure">
+    <ResponseField name="[0]" type="string">
+      Price level for the bid
+    </ResponseField>
+    <ResponseField name="[1]" type="string">
+      Total quantity available at this price level
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="asks" type="array">
+  Array of ask orders in the order book. Each ask is represented as a tuple of `[price, quantity]`.
+  
+  <Expandable title="Ask structure">
+    <ResponseField name="[0]" type="string">
+      Price level for the ask
+    </ResponseField>
+    <ResponseField name="[1]" type="string">
+      Total quantity available at this price level
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+## Example request
+
+```bash
+curl -X GET "http://localhost:3000/api/v1/depth?symbol=SOL_USDC"
+```
+
+## Example response
+
+```json
+{
+  "bids": [
+    ["150.50", "10.5"],
+    ["150.45", "25.3"],
+    ["150.40", "15.7"]
+  ],
+  "asks": [
+    ["150.55", "8.2"],
+    ["150.60", "12.4"],
+    ["150.65", "20.1"]
+  ]
+}
+```
+
+## Error responses
+
+<ResponseField name="500" type="error">
+  Internal server error - Failed to retrieve depth from the matching engine
+</ResponseField>
+
+## Notes
+
+- Bids are sorted in descending order by price (highest bid first)
+- Asks are sorted in ascending order by price (lowest ask first)
+- Quantities at each price level represent the sum of all orders at that price
+- The depth data is retrieved in real-time from the matching engine via Redis pub/sub

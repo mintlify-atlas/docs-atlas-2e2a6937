@@ -1,0 +1,90 @@
+---
+title: 'Deposit funds'
+description: 'Deposit funds into a user account'
+---
+
+<Warning>
+This endpoint is pending implementation and is not currently available in the API.
+</Warning>
+
+## Endpoint
+
+```
+POST /api/v1/users/deposit
+```
+
+This endpoint will allow users to deposit funds into their exchange account.
+
+## Planned request structure
+
+<ParamField body="user_id" type="string" required>
+  The unique identifier of the user making the deposit
+</ParamField>
+
+<ParamField body="asset" type="string" required>
+  The asset to deposit (e.g., "USDC", "SOL")
+</ParamField>
+
+<ParamField body="amount" type="decimal" required>
+  The amount to deposit
+</ParamField>
+
+<ParamField body="transaction_id" type="string" required>
+  The blockchain transaction ID or reference
+</ParamField>
+
+## Planned response structure
+
+<ResponseField name="status" type="string">
+  Status message indicating successful deposit
+</ResponseField>
+
+<ResponseField name="user_id" type="string">
+  The user ID that received the deposit
+</ResponseField>
+
+<ResponseField name="asset" type="string">
+  The deposited asset
+</ResponseField>
+
+<ResponseField name="amount" type="decimal">
+  The deposited amount
+</ResponseField>
+
+<ResponseField name="balance" type="decimal">
+  The user's new balance for the asset
+</ResponseField>
+
+## Example request
+
+```bash
+curl -X POST \
+  https://api.exchange.com/api/v1/users/deposit \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "user_id": "550e8400-e29b-41d4-a716-446655440000",
+    "asset": "USDC",
+    "amount": "1000.00",
+    "transaction_id": "0x123abc..."
+  }'
+```
+
+## Example response
+
+```json
+{
+  "status": "Deposit successful",
+  "user_id": "550e8400-e29b-41d4-a716-446655440000",
+  "asset": "USDC",
+  "amount": "1000.00",
+  "balance": "1000.00"
+}
+```
+
+## Notes
+
+This functionality will need to:
+- Verify blockchain transactions
+- Update user balances in the exchange engine
+- Handle transaction confirmations
+- Implement appropriate security measures

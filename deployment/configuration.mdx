@@ -1,0 +1,424 @@
+---
+title: Configuration
+description: Environment variables and configuration options for the Exchange platform
+---
+
+The Exchange platform is configured using environment variables. This guide documents all available configuration options.
+
+## Environment file setup
+
+The platform uses `.env` files for configuration. Two example files are provided:
+
+- **Project root** - `.env.example` for local development
+- **Docker directory** - `docker/.env.example` for containerized deployment
+
+### Local development
+
+```bash
+cp .env.example .env
+```
+
+### Docker deployment
+
+```bash
+cd docker
+cp .env.example .env
+```
+
+## Configuration categories
+
+### Database configuration
+
+PostgreSQL database connection settings.
+
+<ParamField path="PG__USER" type="string" required>
+  PostgreSQL username for authentication.
+
+  **Default:** `root`
+
+  ```bash
+  PG__USER=root
+  ```
+</ParamField>
+
+<ParamField path="PG__PASSWORD" type="string" required>
+  PostgreSQL password for authentication.
+
+  **Default:** `root`
+
+  <Warning>
+    Use a strong password in production!
+  </Warning>
+
+  ```bash
+  PG__PASSWORD=your-secure-password
+  ```
+</ParamField>
+
+<ParamField path="PG__HOST" type="string" required>
+  PostgreSQL server hostname.
+
+  **Local development:** `localhost`
+
+  **Docker deployment:** `exchange-postgres`
+
+  ```bash
+  PG__HOST=localhost
+  ```
+</ParamField>
+
+<ParamField path="PG__PORT" type="number" required>
+  PostgreSQL server port.
+
+  **Default:** `5000` (local) or `5432` (Docker)
+
+  ```bash
+  PG__PORT=5000
+  ```
+</ParamField>
+
+<ParamField path="PG__DBNAME" type="string" required>
+  PostgreSQL database name.
+
+  **Default:** `exchange-db`
+
+  ```bash
+  PG__DBNAME=exchange-db
+  ```
+</ParamField>
+
+<ParamField path="PG__POOL_MAX_SIZE" type="number" default="16">
+  Maximum number of connections in the database connection pool.
+
+  Adjust based on expected load and server capacity.
+
+  ```bash
+  PG__POOL_MAX_SIZE=16
+  ```
+</ParamField>
+
+<ParamField path="DATABASE_URL" type="string" required>
+  Complete PostgreSQL connection string used by SQLx.
+
+  **Format:** `postgres://user:password@host:port/database`
+
+  ```bash
+  DATABASE_URL=postgres://${PG__USER}:${PG__PASSWORD}@${PG__HOST}:${PG__PORT}/${PG__DBNAME}
+  ```
+
+  <Note>
+    This variable uses variable substitution from the other `PG__*` variables.
+  </Note>
+</ParamField>
+
+### Docker-specific database variables
+
+These variables are used in Docker Compose for PostgreSQL container setup:
+
+<ParamField path="POSTGRES_HOST" type="string">
+  PostgreSQL container hostname.
+
+  ```bash
+  POSTGRES_HOST=exchange-postgres
+  ```
+</ParamField>
+
+<ParamField path="POSTGRES_DB" type="string">
+  PostgreSQL database name (Docker container).
+
+  ```bash
+  POSTGRES_DB=exchange-db
+  ```
+</ParamField>
+
+<ParamField path="POSTGRES_USER" type="string">
+  PostgreSQL username (Docker container).
+
+  ```bash
+  POSTGRES_USER=root
+  ```
+</ParamField>
+
+<ParamField path="POSTGRES_PASSWORD" type="string">
+  PostgreSQL password (Docker container).
+
+  ```bash
+  POSTGRES_PASSWORD=root
+  ```
+</ParamField>
+
+<ParamField path="POSTGRES_PORT" type="number">
+  PostgreSQL internal port in Docker.
+
+  ```bash
+  POSTGRES_PORT=5432
+  ```
+</ParamField>
+
+### Redis configuration
+
+Redis is used for pub/sub messaging and caching.
+
+<ParamField path="REDIS_URL" type="string" required>
+  Complete Redis connection URL.
+
+  **Local development:** `redis://localhost:6380`
+
+  **Docker deployment:** `redis://exchange-redis:6379`
+
+  ```bash
+  REDIS_URL=redis://exchange-redis:6379
+  ```
+</ParamField>
+
+### Service configuration
+
+<ParamField path="SERVER_ADDR" type="string" default="0.0.0.0:8080">
+  Router (REST API) server bind address and port.
+
+  **Format:** `host:port`
+
+  ```bash
+  SERVER_ADDR=0.0.0.0:8080
+  ```
+</ParamField>
+
+<ParamField path="WS_STREAM_URL" type="string" default="0.0.0.0:4000">
+  WebSocket streaming service bind address and port.
+
+  **Format:** `host:port`
+
+  ```bash
+  WS_STREAM_URL=0.0.0.0:4000
+  ```
+</ParamField>
+
+### Build-time configuration
+
+<ParamField path="SQLX_OFFLINE" type="boolean" default="true">
+  Controls SQLx compile-time query verification.
+
+  **Values:**
+  - `true` - Skip compile-time query verification (faster builds)
+  - `false` - Verify queries against database at compile time
+
+  ```bash
+  SQLX_OFFLINE=true
+  ```
+
+  <Note>
+    In Dockerfiles, this is set to `true` to enable offline builds without database access.
+  </Note>
+</ParamField>
+
+<ParamField path="RUST_LOG" type="string" default="info">
+  Rust logging level.
+
+  **Values:** `trace`, `debug`, `info`, `warn`, `error`
+
+  ```bash
+  RUST_LOG=info
+  ```
+</ParamField>
+
+## Configuration examples
+
+### Local development
+
+```bash .env
+# Database
+PG__USER=root
+PG__PASSWORD=root
+PG__HOST=localhost
+PG__PORT=5000
+PG__DBNAME=exchange-db
+PG__POOL_MAX_SIZE=16
+
+DATABASE_URL=postgres://${PG__USER}:${PG__PASSWORD}@${PG__HOST}:${PG__PORT}/${PG__DBNAME}
+
+# Redis
+REDIS_URL=redis://localhost:6380
+
+# Services
+SERVER_ADDR=0.0.0.0:8080
+WS_STREAM_URL=0.0.0.0:4000
+
+# Logging
+RUST_LOG=debug
+```
+
+### Docker deployment
+
+```bash docker/.env
+# PostgreSQL Docker container
+POSTGRES_HOST=exchange-postgres
+POSTGRES_DB=exchange-db
+POSTGRES_USER=root
+POSTGRES_PASSWORD=root
+POSTGRES_PORT=5432
+
+# Service configuration
+SERVER_ADDR=0.0.0.0:8080
+WS_STREAM_URL=0.0.0.0:4000
+
+# Redis
+REDIS_URL=redis://exchange-redis:6379
+
+# Database connection for services
+PG__USER=root
+PG__PASSWORD=root
+PG__HOST=exchange-postgres
+PG__PORT=5432
+PG__DBNAME=exchange-db
+PG__POOL_MAX_SIZE=16
+
+DATABASE_URL=postgres://${PG__USER}:${PG__PASSWORD}@${PG__HOST}:${PG__PORT}/${PG__DBNAME}
+```
+
+### Production deployment
+
+```bash .env
+# Database - use strong credentials!
+PG__USER=exchange_prod_user
+PG__PASSWORD=<STRONG_RANDOM_PASSWORD>
+PG__HOST=production-db-host
+PG__PORT=5432
+PG__DBNAME=exchange_production
+PG__POOL_MAX_SIZE=32
+
+DATABASE_URL=postgres://${PG__USER}:${PG__PASSWORD}@${PG__HOST}:${PG__PORT}/${PG__DBNAME}
+
+# Redis - consider Redis cluster for HA
+REDIS_URL=redis://production-redis-host:6379
+
+# Services
+SERVER_ADDR=0.0.0.0:8080
+WS_STREAM_URL=0.0.0.0:4000
+
+# Logging - use warn or error in production
+RUST_LOG=warn
+```
+
+## Environment validation
+
+The Exchange platform uses the `confik` crate for configuration management with automatic validation.
+
+If required environment variables are missing, services will fail to start with clear error messages.
+
+## Security considerations
+
+<Warning>
+  Follow these security best practices:
+</Warning>
+
+- **Never commit** `.env` files to version control
+- Use **strong passwords** in production (minimum 20 characters)
+- Rotate credentials regularly
+- Use **secrets management** tools (AWS Secrets Manager, HashiCorp Vault, etc.)
+- Restrict database access to application servers only
+- Enable **SSL/TLS** for database and Redis connections in production
+
+## SQLx offline mode
+
+The platform uses SQLx's offline mode for Docker builds:
+
+### Preparing the query cache
+
+If you modify database queries, regenerate the query cache:
+
+```bash
+SQLX_OFFLINE=false cargo sqlx prepare --workspace
+```
+
+This creates/updates files in the `.sqlx` directory.
+
+### Building with offline mode
+
+```bash
+SQLX_OFFLINE=true cargo build
+```
+
+Or set it in your `.env`:
+
+```bash
+SQLX_OFFLINE=true
+```
+
+## PostgreSQL tuning
+
+### Max connections
+
+In Docker Compose, PostgreSQL is configured with:
+
+```yaml
+command: -c 'max_connections=800'
+```
+
+Adjust based on:
+- Number of service instances
+- `PG__POOL_MAX_SIZE` setting
+- Expected concurrent load
+
+**Formula:** `max_connections >= (number_of_services × pool_size) + 10`
+
+### Shared memory
+
+```yaml
+shm_size: 1gb
+```
+
+Increase for better performance with large datasets.
+
+## Redis tuning
+
+### Persistence settings
+
+```yaml
+command: redis-server --save 20 1 --loglevel warning
+```
+
+**Explanation:**
+- `--save 20 1` - Save to disk if at least 1 key changed in 20 seconds
+- `--loglevel warning` - Reduce log verbosity
+
+For high-write workloads, consider:
+```yaml
+command: redis-server --save 60 1000 --loglevel warning
+```
+
+## Troubleshooting
+
+### Database connection fails
+
+Verify your configuration:
+
+```bash
+# Check if variables are set
+echo $DATABASE_URL
+
+# Test connection
+psql $DATABASE_URL -c "SELECT 1;"
+```
+
+### Redis connection fails
+
+```bash
+# Test Redis connection
+redis-cli -u $REDIS_URL ping
+```
+
+### Environment variables not loading
+
+Ensure you're loading the `.env` file:
+
+```bash
+# The project uses dotenvy to load .env automatically
+# If using docker-compose, ensure env_file is specified
+docker compose config  # Verify env vars are loaded
+```
+
+## Next steps
+
+- Learn about [local development](/deployment/local-development)
+- Deploy with [Docker](/deployment/docker)
+- Set up [production deployment](/deployment/production)

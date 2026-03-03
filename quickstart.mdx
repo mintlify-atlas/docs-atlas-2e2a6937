@@ -1,80 +1,242 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: Quickstart
+description: Get Exchange running locally in minutes
 ---
 
-## Get started in three steps
+# Quickstart
 
-Get your documentation site running locally and make your first customization.
+This guide will help you set up Exchange locally and execute your first order.
 
-### Step 1: Set up your local environment
+<Note>
+  Make sure you have Docker and Docker Compose installed on your system before proceeding.
+</Note>
 
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
-    
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
+## Prerequisites
 
-### Step 2: Deploy your changes
+Before you begin, ensure you have the following installed:
 
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
+- [Rust](https://www.rust-lang.org/tools/install) (latest stable version)
+- [Docker](https://docs.docker.com/get-docker/) and [Docker Compose](https://docs.docker.com/compose/install/)
+- [Git](https://git-scm.com/downloads)
 
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
+## Installation
 
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
+<Steps>
+  <Step title="Clone the repository">
+    Clone the Exchange repository to your local machine:
 
-### Step 3: Go live
+    ```bash
+    git clone https://github.com/jogeshwar01/exchange.git
+    cd exchange
+    ```
+  </Step>
 
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
+  <Step title="Configure environment variables">
+    Copy the example environment file and configure your database credentials:
+
+    ```bash
+    cp .env.example .env
+    ```
+
+    The default `.env` configuration looks like this:
+
+    ```bash
+    PG__USER=root
+    PG__PASSWORD=root
+    PG__HOST=localhost
+    PG__PORT=5000
+    PG__DBNAME=exchange-db
+    PG__POOL_MAX_SIZE=16
+
+    DATABASE_URL=postgres://${PG__USER}:${PG__PASSWORD}@${PG__HOST}:${PG__PORT}/${PG__DBNAME}
+    ```
+
+    <Note>
+      You can customize these values based on your local setup, but the defaults should work for most users.
+    </Note>
+  </Step>
+
+  <Step title="Start infrastructure services">
+    Use Docker Compose to start Redis and Postgres:
+
+    ```bash
+    docker-compose up -d
+    ```
+
+    This will start:
+    - Redis on port 6379 (for pub/sub messaging)
+    - Postgres on port 5000 (for persistent storage)
+  </Step>
+
+  <Step title="Build the project">
+    Build all the Exchange components:
+
+    ```bash
+    cargo build
+    ```
+
+    This compiles the four main components:
+    - Router (REST API server)
+    - Engine (order matching engine)
+    - WebSocket stream (real-time data)
+    - Database processor (async DB writes)
+  </Step>
+
+  <Step title="Run the services">
+    In separate terminal windows, start each service:
+
+    **Terminal 1 - Engine:**
+    ```bash
+    cargo run --bin engine
+    ```
+
+    **Terminal 2 - Router:**
+    ```bash
+    cargo run --bin router
+    ```
+
+    **Terminal 3 - Database Processor:**
+    ```bash
+    cargo run --bin db-processor
+    ```
+
+    **Terminal 4 - WebSocket Stream:**
+    ```bash
+    cargo run --bin ws-stream
+    ```
+
+    <Note>
+      The router will start on `http://localhost:8080` by default. You should see "Server running at http://..." in the terminal.
+    </Note>
+  </Step>
+</Steps>
+
+## Create your first order
+
+Now that Exchange is running, let's create a user and place an order.
+
+### Create a user
+
+First, create a test user:
+
+```bash
+curl -X POST http://localhost:8080/api/v1/users \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_id": "test_user",
+    "username": "testuser"
+  }'
+```
+
+### Place a limit order
+
+Create a buy order for SOL/USDC:
+
+```bash
+curl -X POST http://localhost:8080/api/v1/order \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_id": "test_user",
+    "symbol": "SOL_USDC",
+    "side": "Buy",
+    "order_type": "Limit",
+    "quantity": "10",
+    "price": "150.50"
+  }'
+```
+
+You should receive a response with your order details including an `order_id`.
+
+### Check your order status
+
+Retrieve your order using the `order_id` from the previous response:
+
+```bash
+curl -X GET "http://localhost:8080/api/v1/order?order_id=YOUR_ORDER_ID&user_id=test_user"
+```
+
+### Get open orders
+
+View all open orders for your user:
+
+```bash
+curl -X GET "http://localhost:8080/api/v1/orders?user_id=test_user&symbol=SOL_USDC"
+```
+
+### Cancel an order
+
+Cancel a specific order:
+
+```bash
+curl -X DELETE http://localhost:8080/api/v1/order \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_id": "test_user",
+    "order_id": "YOUR_ORDER_ID",
+    "symbol": "SOL_USDC"
+  }'
+```
+
+## Explore market data
+
+Exchange provides several endpoints to query market data:
+
+### Get order book depth
+
+```bash
+curl -X GET "http://localhost:8080/api/v1/depth?symbol=SOL_USDC"
+```
+
+### Get recent trades
+
+```bash
+curl -X GET "http://localhost:8080/api/v1/trades?symbol=SOL_USDC"
+```
+
+### Get ticker data
+
+```bash
+curl -X GET "http://localhost:8080/api/v1/tickers?symbol=SOL_USDC"
+```
+
+### Get kline (candlestick) data
+
+```bash
+curl -X GET "http://localhost:8080/api/v1/klines?symbol=SOL_USDC&interval=1m&startTime=1727022600"
+```
+
+## Connect to WebSocket
+
+For real-time updates, connect to the WebSocket server:
+
+```javascript
+const ws = new WebSocket('ws://localhost:3000');
+
+ws.onopen = () => {
+  // Subscribe to depth updates for SOL_USDC
+  ws.send(JSON.stringify({
+    method: 'SUBSCRIBE',
+    params: ['depth@SOL_USDC']
+  }));
+};
+
+ws.onmessage = (event) => {
+  const data = JSON.parse(event.data);
+  console.log('Received update:', data);
+};
+```
+
+<Warning>
+  The WebSocket URL may differ based on your configuration. Check the `WS_STREAM_URL` environment variable.
+</Warning>
 
 ## Next steps
 
-Now that you have your docs running, explore these key features:
-
 <CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
+  <Card title="Architecture" icon="sitemap" href="/architecture">
+    Learn how Exchange components work together
+  </Card>
+  <Card title="API reference" icon="code" href="/api/overview">
+    Explore all available API endpoints
+  </Card>
 </CardGroup>
-
-<Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
-</Note>

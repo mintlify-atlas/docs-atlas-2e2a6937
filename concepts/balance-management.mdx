@@ -1,0 +1,370 @@
+---
+title: Balance management
+description: Explore how the Exchange tracks and manages user balances with fund locking mechanisms
+---
+
+The Exchange implements a robust in-memory balance management system that tracks available and locked funds for each user across multiple assets. This ensures users cannot spend the same funds twice and maintains consistency during order execution.
+
+## Balance data structures
+
+User balances are represented using two core types:
+
+```rust engine.rs
+pub struct Amount {
+    available: Decimal,
+    locked: Decimal,
+}
+
+pub struct UserBalances {
+    user_id: String,
+    balance: HashMap<Asset, Amount>,
+}
+```
+
+Each user has a `UserBalances` struct containing a HashMap that maps each asset (SOL, USDC, BTC, etc.) to an `Amount` struct with two fields:
+
+- **available**: Funds that can be used for new orders or withdrawals
+- **locked**: Funds currently reserved for open orders
+
+<Note>
+The total balance for an asset is `available + locked`. Locked funds cannot be used for new orders but are still owned by the user.
+</Note>
+
+## Engine balance storage
+
+The engine stores all user balances in a thread-safe HashMap:
+
+```rust engine.rs
+pub struct Engine {
+    pub orderbooks: Vec<OrderBook>,
+    pub balances: HashMap<String, Mutex<UserBalances>>,
+}
+```
+
+Each user's balances are wrapped in a `Mutex` to enable safe concurrent access. Multiple threads can read or update different users' balances simultaneously, while the Mutex prevents race conditions when accessing the same user's balance.
+
+## Balance initialization
+
+When a new user is created, their balances are initialized with default amounts:
+
+```rust engine.rs
+pub fn init_user_balance(&mut self, user_id: &str) {
+    let initial_balances = UserBalances {
+        user_id: user_id.to_string(),
+        balance: HashMap::new(),
+    };
+
+    // Add dummy values for USDC and SOL
+    let usdc_balance = Amount {
+        available: Decimal::new(1000000, 0), // 1,000,000 USDC
+        locked: Decimal::new(0, 0),
+    };
+
+    let sol_balance = Amount {
+        available: Decimal::new(10000, 0), // 10,000 SOL
+        locked: Decimal::new(0, 0),
+    };
+
+    let mut balances_map = initial_balances.balance;
+    balances_map.insert(Asset::USDC, usdc_balance);
+    balances_map.insert(Asset::SOL, sol_balance);
+
+    self.balances.insert(
+        user_id.to_string(),
+        Mutex::new(UserBalances {
+            user_id: user_id.to_string(),
+            balance: balances_map,
+        }),
+    );
+}
+```
+
+<Tip>
+In production, initial balances would come from deposits or database records. The current implementation uses placeholder values for testing.
+</Tip>
+
+## Fund locking mechanism
+
+Before processing an order, the engine validates and locks the required funds:
+
+```rust engine.rs
+pub fn check_and_lock_funds(&mut self, order: &CreateOrder) -> Result<(), &str> {
+    let assets: Vec<&str> = order.market.split('_').collect();
+    let base_asset = Asset::from_str(assets[0])?;
+    let quote_asset = Asset::from_str(assets[1])?;
+
+    let user_id = &order.user_id;
+
+    let user_balance_mutex = self
+        .balances
+        .get_mut(user_id)
+        .ok_or("No matching user found")?;
+
+    // Lock the Mutex to safely access the user's balances
+    let mut user_balance = user_balance_mutex.lock()
+        .map_err(|_| "Mutex lock failed")?;
+
+    match order.side {
+        OrderSide::BUY => {
+            let balance = user_balance
+                .balance
+                .get_mut(&quote_asset)
+                .ok_or("No balance for asset found")?;
+
+            let total_cost = order.price * order.quantity;
+            if balance.available >= total_cost {
+                balance.available -= total_cost;
+                balance.locked += total_cost;
+            } else {
+                return Err("Insufficient funds");
+            }
+        }
+
+        OrderSide::SELL => {
+            let balance = user_balance
+                .balance
+                .get_mut(&base_asset)
+                .ok_or("No balance for asset found")?;
+
+            if balance.available >= order.quantity {
+                balance.available -= order.quantity;
+                balance.locked += order.quantity;
+            } else {
+                return Err("Insufficient asset quantity");
+            }
+        }
+    }
+
+    Ok(())
+}
+```
+
+<Accordion title="Understanding the fund locking logic">
+**For buy orders** (e.g., buying SOL with USDC):
+- The user needs quote asset (USDC) to pay for the order
+- Lock amount = `price × quantity` (total cost in USDC)
+- Funds move from `available` to `locked` for the quote asset
+
+**For sell orders** (e.g., selling SOL for USDC):
+- The user needs base asset (SOL) to sell
+- Lock amount = `quantity` (amount of SOL being sold)
+- Funds move from `available` to `locked` for the base asset
+
+**Atomicity:**
+The entire operation happens while holding the Mutex lock, ensuring no other operation can modify the balance concurrently.
+</Accordion>
+
+## Balance updates during matching
+
+After orders are matched, balances are updated for both parties:
+
+```rust engine.rs
+pub fn update_user_balance(
+    &mut self,
+    base_asset: Asset,
+    quote_asset: Asset,
+    order: Order,
+    order_result: &ProcessOrderResult,
+) -> Result<(), &str> {
+    match order.side {
+        OrderSide::BUY => {
+            for fill in &order_result.fills {
+                // Update buyer's balances (current user)
+                self.update_balance_with_lock(
+                    order.user_id.clone(),
+                    base_asset.clone(),
+                    fill.quantity,
+                    AmountType::AVAILABLE,
+                )?;
+                self.update_balance_with_lock(
+                    order.user_id.clone(),
+                    quote_asset.clone(),
+                    -(fill.price * fill.quantity),
+                    AmountType::LOCKED,
+                )?;
+
+                // Update seller's balances (other user)
+                self.update_balance_with_lock(
+                    fill.other_user_id.clone(),
+                    quote_asset.clone(),
+                    fill.price * fill.quantity,
+                    AmountType::AVAILABLE,
+                )?;
+                self.update_balance_with_lock(
+                    fill.other_user_id.clone(),
+                    base_asset.clone(),
+                    -fill.quantity,
+                    AmountType::LOCKED,
+                )?;
+            }
+        }
+        OrderSide::SELL => {
+            // Similar logic for sell orders
+        }
+    }
+    Ok(())
+}
+```
+
+### Balance state transitions
+
+Here's what happens during a buy order execution:
+
+1. **Before matching** (in `check_and_lock_funds`):
+   - Buyer's USDC: `available -= total_cost`, `locked += total_cost`
+
+2. **After each fill** (in `update_user_balance`):
+   - Buyer receives SOL: `available += fill.quantity`
+   - Buyer's locked USDC is consumed: `locked -= fill.price × fill.quantity`
+   - Seller receives USDC: `available += fill.price × fill.quantity`
+   - Seller's locked SOL is consumed: `locked -= fill.quantity`
+
+<Note>
+Notice that locked funds decrease (negative amount) and available funds increase (positive amount) during settlement. The helper function handles both increases and decreases through signed arithmetic.
+</Note>
+
+## Helper function for balance updates
+
+All balance modifications go through a single helper function:
+
+```rust engine.rs
+fn update_balance_with_lock(
+    &self,
+    user_id: String,
+    asset: Asset,
+    amount: Decimal,
+    amount_type: AmountType,
+) -> Result<(), &str> {
+    let balances = &self.balances;
+    let user_balance_mutex = balances.get(&user_id)
+        .ok_or("No matching user found")?;
+
+    let mut user_balance = user_balance_mutex.lock()
+        .map_err(|_| "Mutex lock failed")?;
+
+    let balance = user_balance
+        .balance
+        .get_mut(&asset)
+        .ok_or("No balance for asset found")?;
+
+    match amount_type {
+        AmountType::AVAILABLE => balance.available += amount,
+        AmountType::LOCKED => balance.locked += amount,
+    }
+
+    Ok(())
+}
+```
+
+This function:
+- Acquires the Mutex lock for the user's balance
+- Finds the specific asset's balance
+- Adds the amount (which can be negative) to either available or locked
+- Releases the lock automatically when the function returns
+
+<Tip>
+Using `+=` with potentially negative values is cleaner than having separate increment/decrement logic. A negative amount decreases the balance, a positive amount increases it.
+</Tip>
+
+## Amount types
+
+The `AmountType` enum specifies which balance component to update:
+
+```rust engine.rs
+pub enum AmountType {
+    AVAILABLE,
+    LOCKED,
+}
+```
+
+This provides type safety when updating balances, preventing bugs where the wrong balance type might be modified.
+
+## Cancellation and unlocking
+
+When an order is cancelled, locked funds are returned to available:
+
+```rust engine.rs
+match order.side {
+    OrderSide::BUY => {
+        self.update_balance_with_lock(
+            order.user_id.clone(),
+            quote_asset.clone(),
+            quantity,
+            AmountType::AVAILABLE,
+        )?;
+
+        self.update_balance_with_lock(
+            order.user_id.clone(),
+            quote_asset.clone(),
+            -quantity,
+            AmountType::LOCKED,
+        )?;
+    }
+    OrderSide::SELL => {
+        // Similar logic for base asset
+    }
+}
+```
+
+The quantity is added to available and subtracted from locked, effectively reversing the locking operation.
+
+## Supported assets
+
+The Exchange supports multiple cryptocurrency assets:
+
+```rust types/engine.rs
+pub enum Asset {
+    USDC,
+    USDT,
+    BTC,
+    ETH,
+    SOL,
+}
+
+impl Asset {
+    pub fn from_str(asset_str: &str) -> Result<Asset, &'static str> {
+        match asset_str {
+            "USDC" => Ok(Asset::USDC),
+            "USDT" => Ok(Asset::USDT),
+            "BTC" => Ok(Asset::BTC),
+            "ETH" => Ok(Asset::ETH),
+            "SOL" => Ok(Asset::SOL),
+            _ => Err("Unsupported asset"),
+        }
+    }
+}
+```
+
+Each asset is tracked independently in the user's balance HashMap.
+
+## Precision and decimal handling
+
+All amounts use the `rust_decimal::Decimal` type, which provides:
+
+- **Arbitrary precision**: No floating-point rounding errors
+- **Exact arithmetic**: Critical for financial calculations
+- **Fixed-point representation**: Maintains decimal places accurately
+
+```rust
+use rust_decimal::Decimal;
+use rust_decimal_macros::dec;
+
+let price = dec!(150.25);
+let quantity = dec!(10.5);
+let total = price * quantity; // Exact: 1577.625
+```
+
+<Note>
+Using `Decimal` instead of `f64` is essential for an exchange. Floating-point arithmetic can introduce rounding errors that would be unacceptable in financial applications.
+</Note>
+
+## Concurrency and thread safety
+
+The balance management system is designed for concurrent access:
+
+- **Mutex protection**: Each user's balance is protected by its own Mutex
+- **Fine-grained locking**: Only the specific user's balance is locked during updates
+- **Parallel processing**: Orders for different users can be processed simultaneously
+- **Deadlock prevention**: Locks are acquired and released in consistent order
+
+The HashMap of Mutexes allows the engine to scale across multiple CPU cores while maintaining consistency.

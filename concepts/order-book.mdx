@@ -1,0 +1,316 @@
+---
+title: Order book
+description: Learn how the Exchange orderbook stores and matches orders using BTreeMap data structures
+---
+
+The orderbook is the heart of the matching engine, maintaining all open buy and sell orders for a trading pair. The Exchange uses Rust's `BTreeMap` to ensure orders are automatically sorted by price level.
+
+## Data structure
+
+The `OrderBook` struct uses separate BTrees for bids (buy orders) and asks (sell orders):
+
+```rust orderbook.rs
+pub struct OrderBook {
+    pub bids: BTreeMap<Decimal, Vec<Order>>,
+    pub asks: BTreeMap<Decimal, Vec<Order>>,
+    pub asset_pair: AssetPair,
+    pub trade_id: i64,
+    last_update_id: i64,
+}
+```
+
+### Why BTreeMap?
+
+BTreeMap provides crucial properties for an orderbook:
+
+- **Automatic sorting**: Keys (prices) are kept in sorted order
+- **Efficient range queries**: Iterating from best to worst prices is O(n)
+- **Fast insertions**: Adding new price levels is O(log n)
+- **Ordered iteration**: `iter()` returns prices in ascending order, `iter().rev()` in descending order
+
+<Note>
+For bids, we want descending price order (highest first), so we use `.rev()`. For asks, we want ascending order (lowest first), so we use `.iter()` directly.
+</Note>
+
+## Order matching algorithm
+
+When a new order arrives, the orderbook matches it against existing orders on the opposite side.
+
+### Matching buy orders (match_asks)
+
+When a buy order arrives, it's matched against existing sell orders (asks):
+
+```rust orderbook.rs
+pub fn match_asks(&mut self, order: &Order) -> ProcessOrderResult {
+    let mut fills: Vec<Fill> = vec![];
+    let mut executed_quantity: Decimal = dec!(0);
+
+    for (_price, asks) in self.asks.iter_mut() {
+        for ask in asks.iter_mut() {
+            if order.price >= ask.price && executed_quantity < order.quantity {
+                let filled_quantity = std::cmp::min(
+                    ask.quantity - executed_quantity,
+                    ask.quantity
+                );
+                self.trade_id += 1;
+
+                executed_quantity += filled_quantity;
+                ask.filled_quantity += filled_quantity;
+
+                fills.push(Fill {
+                    price: ask.price,
+                    quantity: filled_quantity,
+                    trade_id: self.trade_id,
+                    other_user_id: ask.user_id.clone(),
+                    order_id: ask.order_id.clone(),
+                })
+            }
+        }
+
+        // Remove asks that have been completely filled
+        asks.retain(|ask| ask.filled_quantity < ask.quantity);
+    }
+
+    ProcessOrderResult {
+        fills,
+        executed_quantity,
+    }
+}
+```
+
+<Accordion title="How the algorithm works">
+1. **Iterate through ask prices** in ascending order (lowest to highest)
+2. **For each price level**, iterate through all orders at that price (time priority)
+3. **Check if trade is possible**: The buy order's price must be greater than or equal to the ask price
+4. **Calculate fill quantity**: Take the minimum of the remaining order quantity and available ask quantity
+5. **Record the fill**: Create a Fill record with price, quantity, and counterparty details
+6. **Update filled quantities**: Track how much has been filled for both orders
+7. **Remove completed orders**: After processing each price level, remove fully filled asks
+8. **Continue until**: The buy order is fully filled or no more compatible asks exist
+</Accordion>
+
+### Matching sell orders (match_bids)
+
+When a sell order arrives, it's matched against existing buy orders (bids):
+
+```rust orderbook.rs
+pub fn match_bids(&mut self, order: &Order) -> ProcessOrderResult {
+    let mut fills: Vec<Fill> = vec![];
+    let mut executed_quantity: Decimal = dec!(0);
+
+    for (_price, bids) in self.bids.iter_mut().rev() {
+        for bid in bids.iter_mut() {
+            if order.price <= bid.price && executed_quantity < order.quantity {
+                let filled_quantity = std::cmp::min(
+                    bid.quantity - executed_quantity,
+                    bid.quantity
+                );
+                self.trade_id += 1;
+
+                executed_quantity += filled_quantity;
+                bid.filled_quantity += filled_quantity;
+
+                fills.push(Fill {
+                    price: bid.price,
+                    quantity: filled_quantity,
+                    trade_id: self.trade_id,
+                    other_user_id: bid.user_id.clone(),
+                    order_id: bid.order_id.clone(),
+                })
+            }
+        }
+
+        // Remove bids that have been completely filled
+        bids.retain(|bid| bid.filled_quantity < bid.quantity);
+    }
+
+    ProcessOrderResult {
+        fills,
+        executed_quantity,
+    }
+}
+```
+
+The key difference is that bids are iterated in **reverse order** (highest to lowest prices) using `.rev()`, and the matching condition checks if the sell order's price is less than or equal to the bid price.
+
+## Order placement
+
+After matching, any unfilled quantity is added to the orderbook:
+
+```rust orderbook.rs
+pub fn process_order(&mut self, mut order: Order) -> ProcessOrderResult {
+    let order_result: ProcessOrderResult;
+
+    match order.side {
+        OrderSide::BUY => {
+            order_result = self.match_asks(&order);
+            order.filled_quantity = order_result.executed_quantity;
+            
+            if order_result.executed_quantity < order.quantity {
+                self.bids
+                    .entry(order.price)
+                    .and_modify(|orders| orders.push(order.clone()))
+                    .or_insert(vec![order]);
+            }
+            order_result
+        }
+        OrderSide::SELL => {
+            order_result = self.match_bids(&order);
+            
+            if order_result.executed_quantity < order.quantity {
+                self.asks
+                    .entry(order.price)
+                    .and_modify(|orders| orders.push(order.clone()))
+                    .or_insert(vec![order]);
+            }
+            order_result
+        }
+    }
+}
+```
+
+<Tip>
+The `entry()` API provides an efficient way to insert orders:
+- If the price level exists, `and_modify()` appends to the existing vector
+- If it's a new price level, `or_insert()` creates a new vector with the order
+</Tip>
+
+## Order types
+
+Each order in the orderbook contains detailed information:
+
+```rust types/engine.rs
+pub struct Order {
+    pub price: Decimal,
+    pub quantity: Decimal,
+    pub filled_quantity: Decimal,
+    pub order_id: String,
+    pub user_id: String,
+    pub side: OrderSide,
+    pub order_type: OrderType,
+    pub order_status: OrderStatus,
+    pub timestamp: i64,
+}
+
+pub enum OrderSide {
+    BUY,
+    SELL,
+}
+
+pub enum OrderStatus {
+    Pending,
+    Filled,
+    PartiallyFilled,
+    Cancelled,
+}
+```
+
+The `filled_quantity` field tracks partial fills, allowing orders to be matched incrementally across multiple trades.
+
+## Orderbook depth
+
+The orderbook can return aggregated depth information, showing total quantities at each price level:
+
+```rust orderbook.rs
+pub fn get_depth(&self) -> (Vec<(Decimal, Decimal)>, Vec<(Decimal, Decimal)>) {
+    let mut bids_depth: Vec<(Decimal, Decimal)> = Vec::new();
+    let mut asks_depth: Vec<(Decimal, Decimal)> = Vec::new();
+
+    // Aggregate quantities for each price level in bids
+    for (price, orders) in self.bids.iter() {
+        let total_quantity = orders
+            .iter()
+            .fold(Decimal::ZERO, |acc, order| acc + order.quantity);
+        bids_depth.push((*price, total_quantity));
+    }
+
+    // Aggregate quantities for each price level in asks
+    for (price, orders) in self.asks.iter() {
+        let total_quantity = orders
+            .iter()
+            .fold(Decimal::ZERO, |acc, order| acc + order.quantity);
+        asks_depth.push((*price, total_quantity));
+    }
+
+    (bids_depth, asks_depth)
+}
+```
+
+This returns two vectors of (price, quantity) tuples, used for displaying the orderbook to users and for market data feeds.
+
+## Order cancellation
+
+Users can cancel orders from the orderbook:
+
+```rust orderbook.rs
+pub fn cancel_order(&mut self, cancel_order: CancelOrder) -> Result<Order, ()> {
+    let cancel = |orders_map: &mut BTreeMap<Decimal, Vec<Order>>| {
+        if let Some(orders) = orders_map.get_mut(&cancel_order.price) {
+            if let Some(index) = orders
+                .iter()
+                .position(|order| order.order_id == cancel_order.order_id)
+            {
+                let order = orders.get(index).unwrap().clone();
+                orders.remove(index);
+                Ok(order)
+            } else {
+                Err(())
+            }
+        } else {
+            Err(())
+        }
+    };
+
+    match cancel_order.side {
+        OrderSide::BUY => cancel(&mut self.bids),
+        OrderSide::SELL => cancel(&mut self.asks),
+    }
+}
+```
+
+Cancellation requires knowing the order ID, price, and side. The closure removes the order from the appropriate price level and returns it for balance reconciliation.
+
+<Note>
+If all orders are removed from a price level, the vector becomes empty but the BTreeMap entry remains. This has minimal overhead and could be optimized by removing empty price levels.
+</Note>
+
+## Query operations
+
+The orderbook supports querying open orders:
+
+```rust orderbook.rs
+// Get a specific open order
+pub fn get_open_order(&self, user_id: String, order_id: String) -> Result<&Order, ()> {
+    let order = self
+        .bids
+        .values()
+        .chain(self.asks.values())
+        .flat_map(|orders| orders.iter())
+        .find(|order| order.user_id == user_id && order.order_id == order_id);
+
+    match order {
+        Some(order) => Ok(order),
+        None => Err(()),
+    }
+}
+
+// Get all open orders for a user
+pub fn get_open_orders(&mut self, user_id: String) -> Vec<&Order> {
+    self.bids
+        .values()
+        .chain(self.asks.values())
+        .flat_map(|orders| orders.iter())
+        .filter(|order| order.user_id == user_id)
+        .collect()
+}
+```
+
+These methods efficiently search through both bids and asks using iterator chains.
+
+## Performance characteristics
+
+- **Order matching**: O(n) where n is the number of price levels and orders to check
+- **Order insertion**: O(log p) for finding the price level + O(1) for vector append, where p is the number of price levels
+- **Order cancellation**: O(log p) for price lookup + O(m) for finding the order in the vector, where m is the number of orders at that price
+- **Depth calculation**: O(p × m) where p is price levels and m is average orders per level
+- **Memory usage**: Proportional to the number of open orders across all price levels

@@ -1,0 +1,446 @@
+---
+title: Subscriptions
+description: Subscribe to real-time market data streams
+---
+
+Subscribe to specific market data streams to receive real-time updates. The Exchange WebSocket supports three types of data streams for supported trading pairs.
+
+## Available streams
+
+Streams are identified using the format: `{type}.{asset_pair}`
+
+### Stream types
+
+<CardGroup cols={3}>
+  <Card title="Depth" icon="layer-group">
+    Order book depth updates showing bid and ask levels
+  </Card>
+  <Card title="Trade" icon="arrow-right-arrow-left">
+    Executed trades with price, quantity, and timestamp
+  </Card>
+  <Card title="Ticker" icon="chart-line">
+    24-hour ticker statistics including price changes
+  </Card>
+</CardGroup>
+
+### Supported asset pairs
+
+- `BTC_USDT` - Bitcoin / Tether
+- `ETH_USDT` - Ethereum / Tether
+- `SOL_USDT` - Solana / Tether
+- `SOL_USDC` - Solana / USD Coin
+
+## Subscribing to streams
+
+Send a subscribe message to start receiving updates for a specific stream.
+
+<Steps>
+  <Step title="Format the subscription message">
+    Create a JSON message with the `SUBSCRIBE` method:
+
+    ```json
+    {
+      "method": "SUBSCRIBE",
+      "params": ["trade.BTC_USDT"],
+      "id": 1
+    }
+    ```
+
+    | Field | Type | Description |
+    |-------|------|-------------|
+    | `method` | string | Must be `"SUBSCRIBE"` |
+    | `params` | array | Array of stream names to subscribe to |
+    | `id` | number | Unique identifier for this request |
+  </Step>
+
+  <Step title="Send the message">
+    Send the JSON message as a text frame over your WebSocket connection:
+
+    <CodeGroup>
+    ```javascript JavaScript
+    const subscribeMsg = {
+      method: 'SUBSCRIBE',
+      params: ['trade.BTC_USDT'],
+      id: 1
+    };
+
+    ws.send(JSON.stringify(subscribeMsg));
+    ```
+
+    ```python Python
+    import json
+
+    subscribe_msg = {
+        "method": "SUBSCRIBE",
+        "params": ["trade.BTC_USDT"],
+        "id": 1
+    }
+
+    await websocket.send(json.dumps(subscribe_msg))
+    ```
+
+    ```rust Rust
+    let subscribe = r#"{"method":"SUBSCRIBE","params":["trade.BTC_USDT"],"id":1}"#;
+    write.send(Message::Text(subscribe.to_string())).await?;
+    ```
+    </CodeGroup>
+  </Step>
+
+  <Step title="Receive updates">
+    After subscribing, you'll receive real-time updates as they occur. See the stream-specific formats below.
+  </Step>
+</Steps>
+
+## Unsubscribing from streams
+
+To stop receiving updates, send an unsubscribe message:
+
+```json
+{
+  "method": "UNSUBSCRIBE",
+  "params": ["trade.BTC_USDT"],
+  "id": 2
+}
+```
+
+<CodeGroup>
+```javascript JavaScript
+const unsubscribeMsg = {
+  method: 'UNSUBSCRIBE',
+  params: ['trade.BTC_USDT'],
+  id: 2
+};
+
+ws.send(JSON.stringify(unsubscribeMsg));
+```
+
+```python Python
+unsubscribe_msg = {
+    "method": "UNSUBSCRIBE",
+    "params": ["trade.BTC_USDT"],
+    "id": 2
+}
+
+await websocket.send(json.dumps(unsubscribe_msg))
+```
+
+```rust Rust
+let unsubscribe = r#"{"method":"UNSUBSCRIBE","params":["trade.BTC_USDT"],"id":2}"#;
+write.send(Message::Text(unsubscribe.to_string())).await?;
+```
+</CodeGroup>
+
+<Note>
+  When you unsubscribe, the server will immediately stop sending updates for that stream. If you're the last subscriber to a stream, the server will also unsubscribe from the Redis channel to optimize resources.
+</Note>
+
+## Stream data formats
+
+Each stream type sends updates with a consistent structure. All updates include a `stream` field identifying the source and a `data` field containing the actual market data.
+
+### Depth stream
+
+Order book depth updates for a trading pair.
+
+**Stream name format**: `depth.{ASSET_PAIR}`
+
+**Example subscription**:
+```json
+{"method": "SUBSCRIBE", "params": ["depth.ETH_USDT"], "id": 1}
+```
+
+**Update message**:
+```json
+{
+  "stream": "depth.BTC_USDT",
+  "data": {
+    "e": "depth",
+    "s": "BTC_USDT",
+    "E": 1727866324128584,
+    "T": 1727866324088922,
+    "U": 4977146,
+    "u": 4977146,
+    "a": [["62450.50", "1.25"], ["62449.00", "0.50"]],
+    "b": [["62448.00", "2.10"], ["62447.50", "1.80"]]
+  }
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `e` | string | Event type: `"depth"` |
+| `s` | string | Symbol/trading pair |
+| `E` | number | Event time (microseconds) |
+| `T` | number | Transaction time (microseconds) |
+| `U` | number | First update ID |
+| `u` | number | Final update ID |
+| `a` | array | Ask levels: `[[price, quantity], ...]` |
+| `b` | array | Bid levels: `[[price, quantity], ...]` |
+
+<Note>
+  Price levels with quantity `"0"` indicate that level should be removed from the order book.
+</Note>
+
+### Trade stream
+
+Real-time executed trades.
+
+**Stream name format**: `trade.{ASSET_PAIR}`
+
+**Example subscription**:
+```json
+{"method": "SUBSCRIBE", "params": ["trade.BTC_USDT"], "id": 1}
+```
+
+**Update message**:
+```json
+{
+  "stream": "trade.BTC_USDT",
+  "data": {
+    "e": "trade",
+    "s": "BTC_USDT",
+    "t": 12345,
+    "p": "62450.00",
+    "q": "0.5",
+    "T": 1727866324088922,
+    "m": true
+  }
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `e` | string | Event type: `"trade"` |
+| `s` | string | Symbol/trading pair |
+| `t` | number | Trade ID |
+| `p` | string | Price |
+| `q` | string | Quantity |
+| `T` | number | Trade time (microseconds) |
+| `m` | boolean | Is buyer the market maker |
+
+### Ticker stream
+
+24-hour rolling window statistics.
+
+**Stream name format**: `ticker.{ASSET_PAIR}`
+
+**Example subscription**:
+```json
+{"method": "SUBSCRIBE", "params": ["ticker.SOL_USDT"], "id": 1}
+```
+
+**Update message**:
+```json
+{
+  "stream": "ticker.SOL_USDT",
+  "data": {
+    "e": "ticker",
+    "s": "SOL_USDT",
+    "E": 1727866324128584,
+    "p": "145.50",
+    "P": "2.34",
+    "c": "148.25",
+    "o": "145.00",
+    "h": "149.00",
+    "l": "144.50",
+    "v": "125000.50",
+    "q": "18475000.00"
+  }
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `e` | string | Event type: `"ticker"` |
+| `s` | string | Symbol/trading pair |
+| `E` | number | Event time (microseconds) |
+| `p` | string | Price change |
+| `P` | string | Price change percent |
+| `c` | string | Current/last price |
+| `o` | string | Open price |
+| `h` | string | High price |
+| `l` | string | Low price |
+| `v` | string | Volume |
+| `q` | string | Quote volume |
+
+## Multiple subscriptions
+
+You can subscribe to multiple streams in a single message or send separate subscription requests:
+
+### Single message with multiple streams
+
+```json
+{
+  "method": "SUBSCRIBE",
+  "params": [
+    "trade.BTC_USDT",
+    "depth.BTC_USDT",
+    "ticker.BTC_USDT",
+    "trade.ETH_USDT"
+  ],
+  "id": 1
+}
+```
+
+<Note>
+  Currently, the server processes one subscription at a time from the `params` array. For best results, send separate subscription messages for each stream.
+</Note>
+
+### Separate messages
+
+```javascript
+// Subscribe to trades
+ws.send(JSON.stringify({
+  method: 'SUBSCRIBE',
+  params: ['trade.BTC_USDT'],
+  id: 1
+}));
+
+// Subscribe to depth
+ws.send(JSON.stringify({
+  method: 'SUBSCRIBE',
+  params: ['depth.BTC_USDT'],
+  id: 2
+}));
+
+// Subscribe to ticker
+ws.send(JSON.stringify({
+  method: 'SUBSCRIBE',
+  params: ['ticker.BTC_USDT'],
+  id: 3
+}));
+```
+
+## Subscription lifecycle
+
+<Steps>
+  <Step title="Connection established">
+    Your WebSocket connection is opened and tracked by the server.
+  </Step>
+
+  <Step title="Subscribe to streams">
+    Send `SUBSCRIBE` messages for the streams you want. The server:
+    - Adds your connection to the subscription list
+    - Subscribes to the Redis channel if it's the first subscriber
+    - Starts routing updates to you
+  </Step>
+
+  <Step title="Receive updates">
+    As market events occur, the server:
+    - Receives updates via Redis Pub/Sub
+    - Routes them to all subscribed connections
+    - Sends as JSON text frames
+  </Step>
+
+  <Step title="Unsubscribe or disconnect">
+    When you unsubscribe or disconnect, the server:
+    - Removes your connection from subscription lists
+    - Unsubscribes from Redis if you were the last subscriber
+    - Cleans up your session
+  </Step>
+</Steps>
+
+## Error handling
+
+### Invalid stream names
+
+If you subscribe to an invalid stream (unsupported type or asset pair), the server will log an error but won't send a response. Ensure your stream names match the supported formats.
+
+**Valid examples**:
+- `trade.BTC_USDT` ✓
+- `depth.ETH_USDT` ✓
+- `ticker.SOL_USDC` ✓
+
+**Invalid examples**:
+- `trade.INVALID_PAIR` ✗
+- `invalid_type.BTC_USDT` ✗
+- `BTC_USDT` ✗ (missing type)
+
+### Message format errors
+
+Messages that aren't valid JSON or don't match the expected structure are silently ignored. Always validate your messages:
+
+```javascript
+try {
+  const msg = JSON.stringify({
+    method: 'SUBSCRIBE',
+    params: ['trade.BTC_USDT'],
+    id: 1
+  });
+  ws.send(msg);
+} catch (error) {
+  console.error('Failed to send subscription:', error);
+}
+```
+
+## Complete example
+
+Here's a complete example subscribing to multiple streams and handling updates:
+
+```javascript
+const WebSocket = require('ws');
+
+const ws = new WebSocket('ws://your-exchange-domain/ws');
+
+ws.on('open', () => {
+  console.log('Connected to Exchange WebSocket');
+  
+  // Subscribe to BTC trades and depth
+  ws.send(JSON.stringify({
+    method: 'SUBSCRIBE',
+    params: ['trade.BTC_USDT'],
+    id: 1
+  }));
+  
+  ws.send(JSON.stringify({
+    method: 'SUBSCRIBE',
+    params: ['depth.BTC_USDT'],
+    id: 2
+  }));
+  
+  // Subscribe to ETH ticker
+  ws.send(JSON.stringify({
+    method: 'SUBSCRIBE',
+    params: ['ticker.ETH_USDT'],
+    id: 3
+  }));
+});
+
+ws.on('message', (data) => {
+  const update = JSON.parse(data);
+  
+  switch (update.stream.split('.')[0]) {
+    case 'trade':
+      console.log(`Trade: ${update.data.q} @ ${update.data.p}`);
+      break;
+    case 'depth':
+      console.log(`Depth update: ${update.data.a.length} asks, ${update.data.b.length} bids`);
+      break;
+    case 'ticker':
+      console.log(`Ticker: ${update.data.s} - ${update.data.c} (${update.data.P}%)`);
+      break;
+  }
+});
+
+ws.on('close', () => {
+  console.log('Connection closed');
+});
+
+ws.on('error', (error) => {
+  console.error('WebSocket error:', error);
+});
+
+// Graceful shutdown
+process.on('SIGINT', () => {
+  console.log('Unsubscribing and closing...');
+  
+  ws.send(JSON.stringify({
+    method: 'UNSUBSCRIBE',
+    params: ['trade.BTC_USDT'],
+    id: 4
+  }));
+  
+  ws.close();
+  process.exit(0);
+});
+```

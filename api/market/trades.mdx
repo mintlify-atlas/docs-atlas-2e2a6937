@@ -1,0 +1,94 @@
+---
+title: Get recent trades
+description: Retrieve the most recent trades for a trading pair
+---
+
+Returns the last 100 trades executed for a specific trading pair, sorted by timestamp in descending order (most recent first).
+
+## Endpoint
+
+```
+GET /api/v1/trades
+```
+
+## Query parameters
+
+<ParamField query="symbol" type="string" required>
+  Trading pair symbol (e.g., `SOL_USDC`, `BTC_USDT`)
+</ParamField>
+
+## Response
+
+Returns an array of trade objects.
+
+<ResponseField name="trade_id" type="integer">
+  Unique identifier for the trade
+</ResponseField>
+
+<ResponseField name="market" type="string">
+  Trading pair symbol
+</ResponseField>
+
+<ResponseField name="price" type="string">
+  Execution price of the trade
+</ResponseField>
+
+<ResponseField name="quantity" type="string">
+  Amount traded
+</ResponseField>
+
+<ResponseField name="user_id" type="string">
+  ID of the user who initiated the trade
+</ResponseField>
+
+<ResponseField name="other_user_id" type="string">
+  ID of the counterparty user in the trade
+</ResponseField>
+
+<ResponseField name="order_id" type="string">
+  ID of the order that was matched
+</ResponseField>
+
+<ResponseField name="timestamp" type="integer">
+  Unix timestamp in milliseconds when the trade was executed
+</ResponseField>
+
+## Example request
+
+```bash
+curl -X GET "http://localhost:3000/api/v1/trades?symbol=SOL_USDC"
+```
+
+## Example response
+
+```json
+[
+  {
+    "trade_id": 1523,
+    "market": "SOL_USDC",
+    "price": "150.55",
+    "quantity": "5.25",
+    "user_id": "user_123",
+    "other_user_id": "user_456",
+    "order_id": "order_789",
+    "timestamp": 1727022600000
+  },
+  {
+    "trade_id": 1522,
+    "market": "SOL_USDC",
+    "price": "150.50",
+    "quantity": "10.0",
+    "user_id": "user_789",
+    "other_user_id": "user_123",
+    "order_id": "order_790",
+    "timestamp": 1727022550000
+  }
+]
+```
+
+## Notes
+
+- The endpoint returns a maximum of 100 trades
+- Trades are sorted by timestamp in descending order (most recent first)
+- All price and quantity values are returned as strings to preserve decimal precision
+- The timestamp is in Unix milliseconds format

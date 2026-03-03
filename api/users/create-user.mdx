@@ -1,0 +1,63 @@
+---
+title: 'Create user'
+description: 'Create a new user account on the exchange'
+---
+
+## Endpoint
+
+```
+POST /api/v1/users
+```
+
+Creates a new user account with a unique user ID and initializes their balance in the exchange system.
+
+## Request
+
+This endpoint does not require a request body. The user ID is automatically generated using UUID v4.
+
+<Note>
+In the current implementation, the user ID is generated server-side. In a production environment, this would typically be extracted from authentication tokens (cookies or JWT).
+</Note>
+
+## Response
+
+<ResponseField name="status" type="string">
+  Status message indicating successful user creation
+</ResponseField>
+
+<ResponseField name="user_id" type="string">
+  The unique identifier (UUID v4) assigned to the newly created user
+</ResponseField>
+
+## Example request
+
+```bash
+curl -X POST \
+  https://api.exchange.com/api/v1/users \
+  -H 'Content-Type: application/json'
+```
+
+## Example response
+
+```json
+{
+  "status": "Created User",
+  "user_id": "550e8400-e29b-41d4-a716-446655440000"
+}
+```
+
+## Error responses
+
+<ResponseField name="500" type="Internal Server Error">
+  Returns when user creation fails or times out
+</ResponseField>
+
+## Implementation details
+
+The user creation process:
+
+1. Generates a new UUID v4 for the user
+2. Initializes the user's balance in the exchange engine
+3. Returns the user ID upon successful creation
+
+See: `/home/daytona/workspace/source/crates/router/src/routes/user.rs:13`

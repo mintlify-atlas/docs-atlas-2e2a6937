@@ -1,0 +1,244 @@
+---
+title: API overview
+description: Introduction to the Exchange REST API
+---
+
+## Introduction
+
+The Exchange API provides programmatic access to trading functionality, market data, and account management. All endpoints accept and return JSON-formatted data.
+
+## Base URL
+
+All API requests should be made to:
+
+```
+http://localhost:8080/api/v1
+```
+
+<Note>
+The base URL may vary depending on your deployment environment. Check your configuration for the correct server address.
+</Note>
+
+## API endpoints
+
+<CardGroup cols={2}>
+  <Card title="Health" icon="heart-pulse" href="#health">
+    Check API server health status
+  </Card>
+  
+  <Card title="Users" icon="user" href="#users">
+    Create and manage user accounts
+  </Card>
+  
+  <Card title="Orders" icon="list" href="#orders">
+    Execute, retrieve, and cancel orders
+  </Card>
+  
+  <Card title="Market depth" icon="chart-column" href="#market-depth">
+    Get order book depth for trading pairs
+  </Card>
+  
+  <Card title="Trades" icon="arrow-right-arrow-left" href="#trades">
+    Retrieve recent trade history
+  </Card>
+  
+  <Card title="Klines" icon="chart-line" href="#klines">
+    Get candlestick/OHLC data
+  </Card>
+  
+  <Card title="Tickers" icon="gauge" href="#tickers">
+    Get 24-hour ticker statistics
+  </Card>
+</CardGroup>
+
+## Request format
+
+All POST and DELETE requests require a JSON body with the appropriate parameters. GET requests use query parameters.
+
+```json Example POST request
+{
+  "market": "SOL_USDC",
+  "price": "150.50",
+  "quantity": "10.0",
+  "side": "BUY",
+  "user_id": "user-123"
+}
+```
+
+## Response format
+
+Successful responses return HTTP 200 with JSON data:
+
+```json Success response
+{
+  "order_id": "abc123",
+  "status": "filled",
+  "filled_quantity": "10.0"
+}
+```
+
+## Error handling
+
+The API uses standard HTTP status codes to indicate success or failure:
+
+| Status Code | Description |
+|-------------|-------------|
+| 200 | Success |
+| 500 | Internal Server Error - Request failed or timed out |
+
+<Info>
+Most endpoints use a Redis pub/sub pattern for processing. If a request times out or the processing service is unavailable, you'll receive a 500 error.
+</Info>
+
+## Common patterns
+
+### Symbol format
+
+Trading pairs use underscore-separated symbols:
+- `SOL_USDC`
+- `BTC_USDC`
+- `ETH_USDC`
+
+### Decimal precision
+
+Prices and quantities are represented as decimal strings to maintain precision:
+
+```json
+{
+  "price": "150.50",
+  "quantity": "10.0"
+}
+```
+
+### Order sides
+
+Orders can be either:
+- `BUY` - Purchase the base asset
+- `SELL` - Sell the base asset
+
+## Rate limiting
+
+<Note>
+The API currently uses CORS with permissive settings allowing requests from any origin. No explicit rate limiting is implemented at the API level.
+</Note>
+
+## Health
+
+### Check health status
+
+```http
+GET /api/v1/health
+```
+
+Returns HTTP 200 OK if the service is running.
+
+## Users
+
+### Create user
+
+```http
+POST /api/v1/users
+```
+
+Creates a new user account with generated balances.
+
+<Info>
+Currently, user IDs are auto-generated. In production, this would typically be authenticated via JWT or session cookies.
+</Info>
+
+## Orders
+
+### Execute order
+
+```http
+POST /api/v1/order
+```
+
+Create and execute a new order.
+
+### Get open order
+
+```http
+GET /api/v1/order
+```
+
+Retrieve details of a specific open order.
+
+### Cancel order
+
+```http
+DELETE /api/v1/order
+```
+
+Cancel a specific order.
+
+### Get all open orders
+
+```http
+GET /api/v1/orders
+```
+
+Retrieve all open orders for a user and market.
+
+### Cancel all orders
+
+```http
+DELETE /api/v1/orders
+```
+
+Cancel all open orders for a user and market.
+
+## Market depth
+
+### Get order book depth
+
+```http
+GET /api/v1/depth?symbol=SOL_USDC
+```
+
+Returns the current order book depth for a trading pair.
+
+**Query parameters:**
+- `symbol` (required) - Trading pair symbol (e.g., `SOL_USDC`)
+
+## Trades
+
+### Get recent trades
+
+```http
+GET /api/v1/trades?symbol=SOL_USDC
+```
+
+Returns recent trade history for a trading pair.
+
+**Query parameters:**
+- `symbol` (required) - Trading pair symbol (e.g., `SOL_USDC`)
+
+## Klines
+
+### Get candlestick data
+
+```http
+GET /api/v1/klines?symbol=SOL_USDC&interval=1h&startTime=1727022600
+```
+
+Returns OHLC candlestick data for charting.
+
+**Query parameters:**
+- `symbol` (required) - Trading pair symbol (e.g., `SOL_USDC`)
+- `interval` (required) - Time interval: `1min`, `1h`, `1d`, `1w`, `1m`, `1y`
+- `startTime` (required) - Unix timestamp for start of data range
+
+<Note>
+Interval values are case-insensitive and converted to standard formats (minute, hour, day, week, month, year).
+</Note>
+
+## Tickers
+
+### Get 24-hour tickers
+
+```http
+GET /api/v1/tickers
+```
+
+Returns 24-hour price statistics for all trading pairs.

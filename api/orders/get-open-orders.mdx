@@ -1,0 +1,107 @@
+---
+title: Get open orders
+description: Retrieve all open orders for a user in a specific market
+---
+
+Retrieves all open orders for a specific user in a given market. Returns an array of all pending and partially filled orders.
+
+## Endpoint
+
+<Note>GET /api/v1/orders</Note>
+
+## Request
+
+### Body parameters
+
+<ParamField path="user_id" type="string" required>
+  The unique identifier of the user whose orders to retrieve
+</ParamField>
+
+<ParamField path="market" type="string" required>
+  The trading pair market (e.g., "SOL_USDC", "BTC_USDT")
+</ParamField>
+
+## Response
+
+Returns an array of order objects. Each order contains:
+
+<ResponseField name="price" type="decimal">
+  The limit price of the order
+</ResponseField>
+
+<ResponseField name="quantity" type="decimal">
+  The total quantity of the order
+</ResponseField>
+
+<ResponseField name="filled_quantity" type="decimal">
+  The quantity that has been filled
+</ResponseField>
+
+<ResponseField name="order_id" type="string">
+  The unique identifier of the order
+</ResponseField>
+
+<ResponseField name="user_id" type="string">
+  The unique identifier of the user who owns the order
+</ResponseField>
+
+<ResponseField name="side" type="string">
+  The order side ("BUY" or "SELL")
+</ResponseField>
+
+<ResponseField name="order_type" type="string">
+  The type of order ("LIMIT" or "MARKET")
+</ResponseField>
+
+<ResponseField name="order_status" type="string">
+  The current status of the order ("Pending", "Filled", "PartiallyFilled", or "Cancelled")
+</ResponseField>
+
+<ResponseField name="timestamp" type="integer">
+  The Unix timestamp in milliseconds when the order was created
+</ResponseField>
+
+## Example
+
+```bash
+curl -X GET http://localhost:8080/api/v1/orders \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_id": "user123",
+    "market": "SOL_USDC"
+  }'
+```
+
+**Success response:**
+
+```json
+[
+  {
+    "price": "150.50",
+    "quantity": "10.0",
+    "filled_quantity": "3.5",
+    "order_id": "550e8400-e29b-41d4-a716-446655440000",
+    "user_id": "user123",
+    "side": "BUY",
+    "order_type": "LIMIT",
+    "order_status": "PartiallyFilled",
+    "timestamp": 1727022600000
+  },
+  {
+    "price": "152.00",
+    "quantity": "5.0",
+    "filled_quantity": "0.0",
+    "order_id": "660e8400-e29b-41d4-a716-446655440001",
+    "user_id": "user123",
+    "side": "SELL",
+    "order_type": "LIMIT",
+    "order_status": "Pending",
+    "timestamp": 1727022700000
+  }
+]
+```
+
+## Error codes
+
+- **200 OK** - Orders retrieved successfully (returns empty array if no open orders)
+- **500 Internal Server Error** - Failed to retrieve orders or Redis connection error

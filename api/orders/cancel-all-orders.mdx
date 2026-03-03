@@ -1,0 +1,73 @@
+---
+title: Cancel all orders
+description: Cancel all open orders for a user in a specific market
+---
+
+Cancels all open orders for a specific user in a given market. This removes all pending and partially filled orders from the order book.
+
+## Endpoint
+
+<Note>DELETE /api/v1/orders</Note>
+
+## Request
+
+### Body parameters
+
+<ParamField path="user_id" type="string" required>
+  The unique identifier of the user whose orders to cancel
+</ParamField>
+
+<ParamField path="market" type="string" required>
+  The trading pair market (e.g., "SOL_USDC", "BTC_USDT")
+</ParamField>
+
+## Response
+
+### Success response
+
+<ResponseField name="status" type="string">
+  Status message indicating all orders were cancelled
+</ResponseField>
+
+<ResponseField name="user_id" type="string">
+  The unique identifier of the user whose orders were cancelled
+</ResponseField>
+
+### Error response
+
+<ResponseField name="status" type="string">
+  Status message indicating the cancellation failed
+</ResponseField>
+
+## Example
+
+```bash
+curl -X DELETE http://localhost:8080/api/v1/orders \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_id": "user123",
+    "market": "SOL_USDC"
+  }'
+```
+
+**Success response:**
+
+```json
+{
+  "status": "Cancelled All Orders",
+  "user_id": "user123"
+}
+```
+
+**Error response:**
+
+```json
+{
+  "status": "Failed to Cancel All Orders"
+}
+```
+
+## Error codes
+
+- **200 OK** - All orders cancelled successfully
+- **500 Internal Server Error** - Failed to cancel orders or Redis connection error

@@ -1,0 +1,116 @@
+---
+title: Get klines/candlestick data
+description: Retrieve candlestick (kline) data for technical analysis
+---
+
+Returns aggregated candlestick data for a trading pair over a specified time interval. This endpoint is commonly used for charting and technical analysis.
+
+## Endpoint
+
+```
+GET /api/v1/klines
+```
+
+## Query parameters
+
+<ParamField query="symbol" type="string" required>
+  Trading pair symbol (e.g., `SOL_USDC`, `BTC_USDT`)
+</ParamField>
+
+<ParamField query="interval" type="string" required>
+  Time interval for each candlestick. Supported values:
+  - `1min` or `1MIN` - One minute
+  - `1h` or `1H` - One hour
+  - `1d` or `1D` - One day
+  - `1w` or `1W` - One week
+  - `1m` or `1M` - One month
+  - `1y` or `1Y` - One year
+</ParamField>
+
+<ParamField query="startTime" type="string" required>
+  Start timestamp in Unix milliseconds format. Only klines after this time will be returned.
+</ParamField>
+
+## Response
+
+Returns an array of kline objects, sorted by time in ascending order.
+
+<ResponseField name="open" type="string">
+  Opening price for the time period
+</ResponseField>
+
+<ResponseField name="high" type="string">
+  Highest price during the time period
+</ResponseField>
+
+<ResponseField name="low" type="string">
+  Lowest price during the time period
+</ResponseField>
+
+<ResponseField name="close" type="string">
+  Closing price for the time period
+</ResponseField>
+
+<ResponseField name="volume" type="string">
+  Total volume traded during the time period (in base asset)
+</ResponseField>
+
+<ResponseField name="quote_volume" type="string">
+  Total volume traded during the time period (in quote asset, i.e., price × quantity)
+</ResponseField>
+
+<ResponseField name="trades" type="string">
+  Number of trades executed during the time period
+</ResponseField>
+
+<ResponseField name="start" type="string">
+  Start timestamp of the kline period in ISO 8601 UTC format
+</ResponseField>
+
+<ResponseField name="end" type="string">
+  End timestamp of the kline period in ISO 8601 UTC format
+</ResponseField>
+
+## Example request
+
+```bash
+curl -X GET "http://localhost:3000/api/v1/klines?symbol=SOL_USDC&interval=1h&startTime=1727022600000"
+```
+
+## Example response
+
+```json
+[
+  {
+    "open": "150.25",
+    "high": "151.80",
+    "low": "149.90",
+    "close": "150.55",
+    "volume": "1250.5",
+    "quote_volume": "188325.75",
+    "trades": "342",
+    "start": "2024-09-22 14:00:00 +00:00",
+    "end": "2024-09-22 15:00:00 +00:00"
+  },
+  {
+    "open": "150.55",
+    "high": "152.10",
+    "low": "150.30",
+    "close": "151.20",
+    "volume": "980.3",
+    "quote_volume": "148234.56",
+    "trades": "287",
+    "start": "2024-09-22 15:00:00 +00:00",
+    "end": "2024-09-22 16:00:00 +00:00"
+  }
+]
+```
+
+## Notes
+
+- Klines are generated using PostgreSQL's `date_trunc` function for time bucketing
+- The `open` price is the first trade price in the period
+- The `close` price is the last trade price in the period
+- All numeric values are returned as strings to preserve decimal precision
+- Timestamps are returned in UTC timezone
+- If no trades occurred in a time period, no kline will be generated for that period

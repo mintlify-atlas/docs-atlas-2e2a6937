@@ -1,0 +1,88 @@
+---
+title: Create order
+description: Create a new limit order in the order book
+---
+
+Creates a new limit order for a specified market. The order will be matched against existing orders in the order book, and any unfilled quantity will remain as an open order.
+
+## Endpoint
+
+<Note>POST /api/v1/order</Note>
+
+## Request
+
+### Body parameters
+
+<ParamField path="market" type="string" required>
+  The trading pair market (e.g., "SOL_USDC", "BTC_USDT")
+</ParamField>
+
+<ParamField path="price" type="decimal" required>
+  The limit price for the order
+</ParamField>
+
+<ParamField path="quantity" type="decimal" required>
+  The quantity of the base asset to buy or sell
+</ParamField>
+
+<ParamField path="side" type="string" required>
+  The order side. Must be either "BUY" or "SELL"
+</ParamField>
+
+<ParamField path="user_id" type="string" required>
+  The unique identifier of the user placing the order
+</ParamField>
+
+## Response
+
+### Success response
+
+<ResponseField name="status" type="string">
+  Status message indicating the order was created
+</ResponseField>
+
+<ResponseField name="order_id" type="string">
+  The unique identifier assigned to the created order
+</ResponseField>
+
+### Error response
+
+<ResponseField name="status" type="string">
+  Status message indicating the order creation failed
+</ResponseField>
+
+## Example
+
+```bash
+curl -X POST http://localhost:8080/api/v1/order \
+  -H "Content-Type: application/json" \
+  -d '{
+    "market": "SOL_USDC",
+    "price": "150.50",
+    "quantity": "10.0",
+    "side": "BUY",
+    "user_id": "user123"
+  }'
+```
+
+**Success response:**
+
+```json
+{
+  "status": "Created Order",
+  "order_id": "550e8400-e29b-41d4-a716-446655440000"
+}
+```
+
+**Error response:**
+
+```json
+{
+  "status": "Failed to Create Order"
+}
+```
+
+## Error codes
+
+- **200 OK** - Order created successfully
+- **500 Internal Server Error** - Failed to process the order or Redis connection error

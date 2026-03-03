@@ -1,0 +1,409 @@
+---
+title: Docker deployment
+description: Run the Exchange platform using Docker and Docker Compose
+---
+
+The Exchange platform is fully containerized, allowing you to run all services using Docker Compose. This guide covers both infrastructure-only and full containerized deployments.
+
+## Architecture overview
+
+The platform consists of the following containerized services:
+
+- **Router** - REST API server (port 8080)
+- **Engine** - Order matching engine (port 8081)
+- **WebSocket Stream** - Real-time market data (port 4000)
+- **Database Processor** - Database operations (port 8083)
+- **PostgreSQL** - Persistent storage (port 5432)
+- **Redis** - Pub/sub and caching (port 6379)
+
+## Docker Compose files
+
+The project includes two Docker Compose configurations:
+
+### docker-compose.yml
+
+Runs infrastructure services (PostgreSQL and Redis):
+
+```yaml docker/docker-compose.yml
+version: "3"
+
+services:
+  db:
+    container_name: exchange-postgres
+    image: postgres
+    command: -c 'max_connections=800'
+    shm_size: 1gb
+    restart: always
+    ports:
+      - "5000:5432"
+    volumes:
+      - ./postgres-data:/var/lib/postgresql/data
+
+  redis:
+    container_name: exchange-redis
+    image: redis:6.2-alpine
+    command: redis-server --save 20 1 --loglevel warning
+    restart: always
+    ports:
+      - "6380:6379"
+    volumes:
+      - ./redis-data:/var/lib/redis/data
+```
+
+### docker-compose-core.yml
+
+Runs all application services (Router, Engine, WebSocket Stream, DB Processor):
+
+```yaml docker/docker-compose-core.yml
+version: "3"
+
+services:
+  router:
+    container_name: exchange-router
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.router
+    restart: always
+    ports:
+      - "7000:8080"
+
+  engine:
+    container_name: exchange-engine
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.engine
+    restart: always
+    ports:
+      - "7001:8081"
+
+  ws-stream:
+    container_name: exchange-ws-stream
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.ws-stream
+    restart: always
+    ports:
+      - "7002:4000"
+
+  db-processor:
+    container_name: exchange-db-processor
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.db-processor
+    restart: always
+    ports:
+      - "7003:8083"
+```
+
+## Quick start
+
+<Steps>
+  <Step title="Configure environment">
+    Copy the example environment file for Docker:
+
+    ```bash
+    cd docker
+    cp .env.example .env
+    ```
+
+    The default configuration works for containerized deployment:
+
+    ```bash
+    POSTGRES_HOST=exchange-postgres
+    POSTGRES_DB=exchange-db
+    POSTGRES_USER=root
+    POSTGRES_PASSWORD=root
+    POSTGRES_PORT=5432
+
+    SERVER_ADDR=0.0.0.0:8080
+    WS_STREAM_URL=0.0.0.0:4000
+
+    REDIS_URL=redis://exchange-redis:6379
+
+    PG__USER=root
+    PG__PASSWORD=root
+    PG__HOST=exchange-postgres
+    PG__PORT=5432
+    PG__DBNAME=exchange-db
+    PG__POOL_MAX_SIZE=16
+
+    DATABASE_URL=postgres://root:root@exchange-postgres:5432/exchange-db
+    ```
+  </Step>
+
+  <Step title="Start infrastructure services">
+    Start PostgreSQL and Redis:
+
+    ```bash
+    docker compose -f docker-compose.yml up -d
+    ```
+
+    Verify services are running:
+
+    ```bash
+    docker ps
+    ```
+  </Step>
+
+  <Step title="Build and start application services">
+    Build and start all application services:
+
+    ```bash
+    docker compose -f docker-compose-core.yml up
+    ```
+
+    Or run in detached mode:
+
+    ```bash
+    docker compose -f docker-compose-core.yml up -d
+    ```
+  </Step>
+</Steps>
+
+## Using the convenience script
+
+The project includes a helper script to manage both compose files:
+
+```bash docker/docker.sh
+#!/bin/bash
+docker compose -f docker-compose-core.yml down
+docker compose -f docker-compose.yml down
+
+docker compose -f docker-compose.yml up -d
+docker compose -f docker-compose-core.yml up
+```
+
+Run it with:
+
+```bash
+cd docker
+chmod +x docker.sh
+./docker.sh
+```
+
+## Port mappings
+
+### Infrastructure services
+
+| Container | Internal Port | External Port |
+|-----------|---------------|---------------|
+| exchange-postgres | 5432 | 5000 |
+| exchange-redis | 6379 | 6380 |
+
+### Application services
+
+| Container | Internal Port | External Port |
+|-----------|---------------|---------------|
+| exchange-router | 8080 | 7000 |
+| exchange-engine | 8081 | 7001 |
+| exchange-ws-stream | 4000 | 7002 |
+| exchange-db-processor | 8083 | 7003 |
+
+<Note>
+  Application services use external ports in the 7000 range to avoid conflicts with local development.
+</Note>
+
+## Dockerfiles
+
+All services use multi-stage builds for optimized image sizes:
+
+### Build stage pattern
+
+```dockerfile
+FROM rust:1.87-slim AS builder
+
+WORKDIR /app
+COPY . .
+
+# Set SQLX to offline mode
+ENV SQLX_OFFLINE=true
+
+# Build the binary
+RUN cargo build --release --bin <service-name>
+```
+
+### Runtime stage pattern
+
+```dockerfile
+FROM debian:bookworm-slim
+
+WORKDIR /app
+
+# Install runtime dependencies
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
+
+# Copy the binary from builder
+COPY --from=builder /app/target/release/<service-name> /app/<service-name>
+
+# Set environment variables
+ENV RUST_LOG=info
+
+EXPOSE <port>
+
+CMD ["/app/<service-name>"]
+```
+
+## Resource limits
+
+All services are configured with memory limits:
+
+```yaml
+deploy:
+  resources:
+    limits:
+      memory: 5G
+```
+
+<Warning>
+  Adjust memory limits based on your available system resources and expected load.
+</Warning>
+
+## Volumes and data persistence
+
+### PostgreSQL data
+
+Data is persisted in:
+```
+docker/postgres-data/
+```
+
+### Redis data
+
+Data is persisted in:
+```
+docker/redis-data/
+```
+
+<Note>
+  These directories are created automatically and should be added to `.gitignore`.
+</Note>
+
+## Networking
+
+Services communicate over a Docker bridge network named `exchange`:
+
+```yaml
+networks:
+  gateway:
+    name: exchange
+    external: false  # for infrastructure
+    external: true   # for application services
+```
+
+## Managing services
+
+### View logs
+
+<CodeGroup>
+  ```bash All services
+  docker compose -f docker-compose-core.yml logs -f
+  ```
+
+  ```bash Specific service
+  docker logs -f exchange-router
+  ```
+
+  ```bash Last 100 lines
+  docker logs --tail 100 exchange-engine
+  ```
+</CodeGroup>
+
+### Restart services
+
+```bash
+# Restart all services
+docker compose -f docker-compose-core.yml restart
+
+# Restart specific service
+docker restart exchange-router
+```
+
+### Stop services
+
+```bash
+# Stop application services
+docker compose -f docker-compose-core.yml down
+
+# Stop infrastructure
+docker compose -f docker-compose.yml down
+
+# Stop and remove volumes
+docker compose -f docker-compose.yml down -v
+```
+
+### Rebuild services
+
+```bash
+# Rebuild without cache
+docker compose -f docker-compose-core.yml build --no-cache
+
+# Rebuild and restart
+docker compose -f docker-compose-core.yml up --build
+```
+
+## Health checks
+
+Check if services are healthy:
+
+```bash
+# Check all containers
+docker ps
+
+# Check specific service health
+docker inspect exchange-router | grep Status
+
+# Test PostgreSQL
+docker exec -it exchange-postgres psql -U root -d exchange-db -c "SELECT 1;"
+
+# Test Redis
+docker exec -it exchange-redis redis-cli ping
+```
+
+## Troubleshooting
+
+### Build failures
+
+If Docker builds fail:
+
+```bash
+# Clean Docker build cache
+docker builder prune -a
+
+# Remove all containers and rebuild
+docker compose -f docker-compose-core.yml down
+docker compose -f docker-compose-core.yml build --no-cache
+```
+
+### Network issues
+
+If services can't communicate:
+
+```bash
+# Recreate network
+docker network rm exchange
+docker compose -f docker-compose.yml up -d
+
+# Inspect network
+docker network inspect exchange
+```
+
+### Container crashes
+
+Check container logs for errors:
+
+```bash
+docker logs exchange-router
+```
+
+Verify environment variables:
+
+```bash
+docker exec -it exchange-router env
+```
+
+## Next steps
+
+- Learn about [production deployment](/deployment/production)
+- Configure [environment variables](/deployment/configuration)
